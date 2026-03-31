@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova AI Router - 集群监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #60a5fa;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #475569;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .header h1::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .header .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+        }
+        /* Tab Navigation */
+        .tab-nav {
+            display: flex;
+            gap: 0.25rem;
+            background: var(--bg-secondary);
+            padding: 0.5rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .tab-btn:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        .tab-btn.active {
+            background: var(--accent);
+            color: white;
+        }
+        .tab-btn .count {
+            background: rgba(255,255,255,0.2);
+            padding: 0.1rem 0.4rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
+        }
+        .tab-btn.active .count {
+            background: rgba(255,255,255,0.3);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        /* Overview Tab */
+        .overview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        }
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .stat-card .sub {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-top: 0.25rem;
+        }
+        /* Section Styles */
+        .section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .section-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-card);
+        }
+        .section-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 14px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+        .refresh-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.4rem 0.9rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: background 0.2s;
+        }
+        .refresh-btn:hover { background: var(--accent-hover); }
+        /* Scrollable Container */
+        .scroll-container {
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+        .scroll-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scroll-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scroll-container::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        .scroll-container::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+        /* Nodes Grid */
+        .nodes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+        }
+        .node-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+        .node-card:hover {
+            border-color: var(--accent);
+        }
+        .node-card.local { border-color: var(--accent); }
+        .node-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .node-id {
+            font-weight: 600;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+        .node-id .tag {
+            font-size: 0.6rem;
+            background: var(--accent);
+            color: white;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        .node-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .node-meta span { display: flex; align-items: center; gap: 0.4rem; }
+        .endpoint-list { display: flex; flex-direction: column; gap: 0.4rem; }
+        .endpoint-item {
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+            font-size: 0.75rem;
+        }
+        .endpoint-path {
+            font-family: monospace;
+            color: var(--accent);
+            margin-bottom: 0.3rem;
+        }
+        .endpoint-path a {
+            color: var(--accent);
+            text-decoration: none;
+            cursor: pointer;
+            padding: 0.15rem 0.3rem;
+            border-radius: 3px;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .endpoint-path a:hover {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+        .endpoint-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+        }
+        .endpoint-meta span {
+            display: flex;
+            align-items: center;
+            gap: 0.2rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.6rem;
+            font-weight: 600;
+        }
+        .badge-healthy { background: rgba(34,197,94,0.2); color: var(--success); }
+        .badge-unhealthy { background: rgba(239,68,68,0.2); color: var(--danger); }
+        .badge-plugin { background: rgba(245,158,11,0.2); color: var(--warning); }
+        /* Endpoints Table */
+        .endpoints-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+        .endpoints-table th {
+            text-align: left;
+            padding: 0.75rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-weight: 600;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .endpoints-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+        .endpoints-table tr:hover td {
+            background: rgba(59, 130, 246, 0.05);
+        }
+        .endpoints-table .path-cell {
+            font-family: monospace;
+            font-weight: 500;
+        }
+        .endpoints-table .path-cell a {
+            color: var(--accent);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .endpoints-table .path-cell a:hover {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+        .endpoints-table .path-cell a::after {
+            content: '↗';
+            font-size: 0.7rem;
+            opacity: 0.7;
+        }
+        .endpoints-table .node-count {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+        .endpoints-table .node-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.15rem 0.4rem;
+            background: var(--bg-card);
+            border-radius: 4px;
+            font-size: 0.65rem;
+        }
+        .endpoints-table .node-badge.local {
+            border: 1px solid var(--accent);
+        }
+        .endpoints-table .load-bar {
+            width: 50px;
+            height: 4px;
+            background: var(--bg-secondary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .endpoints-table .load-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+        .endpoints-table .load-fill.warning { background: var(--warning); }
+        .endpoints-table .load-fill.danger { background: var(--danger); }
+        .endpoints-table .desc-cell {
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-secondary);
+        }
+        /* Add Node Form */
+        .add-node-form {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .add-node-form input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.6rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            transition: border-color 0.2s;
+        }
+        .add-node-form input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .add-node-form input::placeholder {
+            color: var(--text-secondary);
+        }
+        .add-node-form input.error {
+            border-color: var(--danger);
+        }
+        .add-node-form button {
+            padding: 0.6rem 1.5rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .add-node-form button:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+        .add-node-form button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .alert-success {
+            background: rgba(34,197,94,0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        .alert-error {
+            background: rgba(239,68,68,0.15);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        .loading { opacity: 0.5; pointer-events: none; }
+        .error-msg {
+            background: rgba(239,68,68,0.1);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { padding: 1rem; }
+            .tab-nav { flex-wrap: wrap; }
+            .tab-btn { flex: 1 1 45%; }
+            .nodes-grid { grid-template-columns: 1fr; }
+            .overview-grid { grid-template-columns: repeat(2, 1fr); }
+            .endpoints-table { display: block; overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Nova AI Router<span class="subtitle" id="update-time">加载中...</span></h1>
+    </header>
+    <main class="container">
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('overview')">
+                <span>总览</span>
+            </button>
+            <button class="tab-btn" onclick="switchTab('nodes')">
+                <span>节点</span>
+                <span class="count" id="nodes-count">0</span>
+            </button>
+            <button class="tab-btn" onclick="switchTab('endpoints')">
+                <span>端点</span>
+                <span class="count" id="endpoints-count">0</span>
+            </button>
+            <button class="tab-btn" onclick="switchTab('monitor')">
+                <span>监控</span>
+            </button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content active">
+            <!-- Stats Cards -->
+            <div class="overview-grid">
+                <div class="stat-card">
+                    <div class="label">集群节点</div>
+                    <div class="value" id="stat-nodes">-</div>
+                    <div class="sub">本地 + 远程节点</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">总端点数</div>
+                    <div class="value" id="stat-endpoints">-</div>
+                    <div class="sub">本地 + 远程端点</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">活跃请求</div>
+                    <div class="value" id="stat-active">-</div>
+                    <div class="sub">当前处理中的请求</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">队列长度</div>
+                    <div class="value" id="stat-queue">-</div>
+                    <div class="sub">等待处理的请求</div>
+                </div>
+            </div>
+
+            <!-- Add Node Form -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">添加节点</div>
+                </div>
+                <div style="padding: 1rem;">
+                    <form class="add-node-form" id="add-node-form" onsubmit="return handleAddNode(event)">
+                        <input type="text" id="node-ip" placeholder="输入 IP 地址，如 192.168.1.100" autocomplete="off">
+                        <button type="submit" id="add-btn">添加节点</button>
+                    </form>
+                    <div id="add-node-alert"></div>
+                </div>
+            </div>
+
+            <!-- Quick Endpoints Preview -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">端点预览</div>
+                    <button class="refresh-btn" onclick="switchTab('endpoints'); fetchData();">查看全部</button>
+                </div>
+                <div class="scroll-container">
+                    <table class="endpoints-table" id="overview-endpoints-table">
+                        <thead>
+                            <tr>
+                                <th>路径</th>
+                                <th>节点</th>
+                                <th>健康</th>
+                                <th>负载</th>
+                            </tr>
+                        </thead>
+                        <tbody id="overview-endpoints-tbody">
+                            <tr><td colspan="4" class="empty-state">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nodes Tab -->
+        <div id="tab-nodes" class="tab-content">
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">节点列表</div>
+                    <button class="refresh-btn" onclick="fetchData()">刷新</button>
+                </div>
+                <div class="scroll-container">
+                    <div class="nodes-grid" id="nodes-container">
+                        <div class="empty-state">加载中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Endpoints Tab -->
+        <div id="tab-endpoints" class="tab-content">
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">端点列表</div>
+                    <button class="refresh-btn" onclick="fetchData()">刷新</button>
+                </div>
+                <div class="scroll-container">
+                    <table class="endpoints-table" id="endpoints-table">
+                        <thead>
+                            <tr>
+                                <th>路径</th>
+                                <th>服务ID</th>
+                                <th>节点</th>
+                                <th>健康</th>
+                                <th>负载</th>
+                                <th>描述</th>
+                            </tr>
+                        </thead>
+                        <tbody id="endpoints-tbody">
+                            <tr><td colspan="6" class="empty-state">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitor Tab -->
+        <div id="tab-monitor" class="tab-content">
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">实时监控 (最近 5 分钟)</div>
+                </div>
+                <div style="padding:1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;">
+                    <div style="background:var(--bg-card);padding:1rem;border-radius:8px;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.9rem;">活跃请求数</h3>
+                        <canvas id="chart-active" width="400" height="200"></canvas>
+                    </div>
+                    <div style="background:var(--bg-card);padding:1rem;border-radius:8px;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.9rem;">队列长度</h3>
+                        <canvas id="chart-queue" width="400" height="200"></canvas>
+                    </div>
+                    <div style="background:var(--bg-card);padding:1rem;border-radius:8px;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.9rem;">集群节点数</h3>
+                        <canvas id="chart-nodes" width="400" height="200"></canvas>
+                    </div>
+                    <div style="background:var(--bg-card);padding:1rem;border-radius:8px;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.9rem;">总端点数</h3>
+                        <canvas id="chart-endpoints" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const apiBase = '/v1';
+        const businessPort = 15050;
+        let autoRefresh = true;
+        let refreshInterval;
+        let cachedData = null;
+
+        // History data for charts
+        const HISTORY_MAX = 100;
+        let history = {
+            timestamps: [],
+            activeRequests: [],
+            queueLength: [],
+            clusterNodes: [],
+            totalEndpoints: []
+        };
+
+        function switchTab(tab) {
+            // Update buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.closest('.tab-btn').classList.add('active');
+
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+
+        async function fetchData() {
+            const nodesContainer = document.getElementById('nodes-container');
+            nodesContainer.classList.add('loading');
+
+            try {
+                const resp = await fetch(apiBase + '/global');
+                if (!resp.ok) throw new Error('API请求失败');
+                const globalData = await resp.json();
+                const data = transformGlobalData(globalData);
+
+                // 并行请求每个节点的详细信息，获取 address 和 service_port
+                const nodeDetailPromises = data.nodes.map(node =>
+                    fetch(apiBase + '/node/' + encodeURIComponent(node.node_id))
+                        .then(r => r.ok ? r.json() : null)
+                        .catch(() => null)
+                );
+                const nodeDetails = await Promise.all(nodeDetailPromises);
+                nodeDetails.forEach((detail, index) => {
+                    if (detail && data.nodes[index]) {
+                        data.nodes[index].address = detail.address || data.nodes[index].address;
+                        data.nodes[index].service_port = detail.service_port || data.nodes[index].service_port;
+                    }
+                });
+
+                cachedData = data;
+
+                renderStats(data.stats);
+                renderNodes(data.nodes);
+                renderEndpoints(data.nodes);
+                renderOverviewEndpoints(data.nodes);
+                updateCounts(data.nodes);
+
+                recordHistory(data.stats);
+                if (document.getElementById('tab-monitor').classList.contains('active')) {
+                    renderAllCharts();
+                }
+
+                document.getElementById('update-time').textContent = '最后更新: ' + data.stats.timestamp;
+            } catch (e) {
+                nodesContainer.innerHTML = '<div class="error-msg">加载失败: ' + e.message + '</div>';
+            } finally {
+                nodesContainer.classList.remove('loading');
+            }
+        }
+
+        function transformGlobalData(globalData) {
+            const rawNodes = globalData.nodes || [];
+            let totalEndpoints = 0;
+            let totalActive = 0;
+            let totalQueueLen = 0;
+
+            const nodes = rawNodes.map((node, index) => {
+                const isLocal = (index === 0);
+                const pathInfos = node.path_infos || [];
+                const endpointCount = pathInfos.length;
+
+                totalEndpoints += endpointCount;
+                pathInfos.forEach(pi => {
+                    totalActive += (pi.active || 0);
+                    totalQueueLen += (pi.queue_len || 0);
+                });
+
+                const endpoints = pathInfos.map(pi => ({
+                    node_path: pi.path || '',
+                    service_id: pi.service_id || '',
+                    description: pi.description || '',
+                    healthy: pi.healthy !== false,
+                    plugin: pi.plugin || false,
+                    active: pi.active || 0,
+                    queue_len: pi.queue_len || 0,
+                    max_concurrent: pi.max_concurrent || 0
+                }));
+
+                let lastSeen = '刚刚';
+                if (node.last_seen) {
+                    const d = new Date(node.last_seen);
+                    if (!isNaN(d.getTime())) {
+                        lastSeen = d.toLocaleString('zh-CN');
+                    }
+                }
+
+                return {
+                    node_id: node.node_id,
+                    is_local: isLocal,
+                    address: '-',
+                    service_port: isLocal ? businessPort : 0,
+                    endpoint_count: endpointCount,
+                    last_seen: lastSeen,
+                    endpoints: endpoints
+                };
+            });
+
+            const now = new Date();
+            const timestamp = now.getFullYear() + '-' +
+                String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(now.getDate()).padStart(2, '0') + ' ' +
+                String(now.getHours()).padStart(2, '0') + ':' +
+                String(now.getMinutes()).padStart(2, '0') + ':' +
+                String(now.getSeconds()).padStart(2, '0');
+
+            return {
+                stats: {
+                    cluster_nodes: rawNodes.length,
+                    total_endpoints: totalEndpoints,
+                    total_active: totalActive,
+                    total_queue_len: totalQueueLen,
+                    timestamp: timestamp
+                },
+                nodes: nodes
+            };
+        }
+
+        function updateCounts(nodes) {
+            const nodeCount = nodes ? nodes.length : 0;
+            let endpointCount = 0;
+            if (nodes) {
+                nodes.forEach(node => {
+                    endpointCount += (node.endpoints || []).length;
+                });
+            }
+            document.getElementById('nodes-count').textContent = nodeCount;
+            document.getElementById('endpoints-count').textContent = endpointCount;
+        }
+
+        function renderStats(stats) {
+            document.getElementById('stat-nodes').textContent = stats.cluster_nodes;
+            document.getElementById('stat-endpoints').textContent = stats.total_endpoints;
+            document.getElementById('stat-active').textContent = stats.total_active;
+            document.getElementById('stat-queue').textContent = stats.total_queue_len;
+        }
+
+        function renderNodes(nodes) {
+            const container = document.getElementById('nodes-container');
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无节点数据</div>';
+                return;
+            }
+
+            container.innerHTML = nodes.map(node => {
+                const endpointItems = (node.endpoints || []).map(ep => {
+                    const healthBadge = ep.healthy
+                        ? '<span class="badge badge-healthy">健康</span>'
+                        : '<span class="badge badge-unhealthy">异常</span>';
+                    const pluginBadge = ep.plugin ? '<span class="badge badge-plugin">插件</span>' : '';
+                    const desc = ep.description ? '<span>' + escapeHtml(ep.description) + '</span>' : '';
+                    const nodePath = ep.node_path || ep.path || '';
+                    const targetUrl = 'http://127.0.0.1:' + businessPort + encodeURI(nodePath);
+                    if (!nodePath) {
+                        return '<div class="endpoint-item"><div class="endpoint-path" style="color:#888;">无路径信息</div></div>';
+                    }
+                    return '<div class="endpoint-item">' +
+                        '<div class="endpoint-path" style="display:flex;align-items:center;gap:0.5rem;">' +
+                            '<a href="' + targetUrl + '" target="_blank" style="color:var(--accent);font-family:monospace;text-decoration:none;">' + escapeHtml(nodePath) + '</a>' +
+                            '<button onclick="window.open(\'' + targetUrl.replace(/'/g, "\\'") + '\', \'_blank\')" style="background:var(--accent);color:white;border:none;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.7rem;">打开</button>' +
+                        '</div>' +
+                        '<div class="endpoint-meta">' +
+                            healthBadge + pluginBadge +
+                            '<span>活跃: ' + ep.active + '</span>' +
+                            '<span>队列: ' + ep.queue_len + '</span>' +
+                            '<span>最大并发: ' + ep.max_concurrent + '</span>' +
+                            desc +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+
+                const localTag = node.is_local ? '<span class="tag">本节点</span>' : '';
+                const address = node.is_local ? (node.address || '-') : (node.address + ':' + (node.service_port || '-'));
+
+                return '<div class="node-card' + (node.is_local ? ' local' : '') + '">' +
+                    '<div class="node-header">' +
+                        '<div class="node-id">' + escapeHtml(node.node_id) + localTag + '</div>' +
+                    '</div>' +
+                    '<div class="node-meta">' +
+                        '<span>地址: ' + escapeHtml(address) + '</span>' +
+                        '<span>端点: ' + (node.endpoint_count || 0) + ' 个</span>' +
+                        '<span>最后活跃: ' + node.last_seen + '</span>' +
+                    '</div>' +
+                    '<div class="endpoint-list">' + (endpointItems || '<div class="empty-state">无端点</div>') + '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        function renderOverviewEndpoints(nodes) {
+            const tbody = document.getElementById('overview-endpoints-tbody');
+            if (!nodes || nodes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">暂无端点数据</td></tr>';
+                return;
+            }
+
+            // Get unique endpoints (first occurrence per path)
+            const endpointMap = new Map();
+            nodes.forEach(node => {
+                (node.endpoints || []).forEach(ep => {
+                    if (!endpointMap.has(ep.node_path)) {
+                        endpointMap.set(ep.node_path, {
+                            node_path: ep.node_path,
+                            healthy: ep.healthy,
+                            active: ep.active || 0,
+                            max_concurrent: ep.max_concurrent || 0,
+                            nodes: [{ node_id: node.node_id, is_local: node.is_local, healthy: ep.healthy }]
+                        });
+                    } else {
+                        const existing = endpointMap.get(ep.node_path);
+                        existing.nodes.push({
+                            node_id: node.node_id,
+                            is_local: node.is_local,
+                            healthy: ep.healthy
+                        });
+                        existing.active += (ep.active || 0);
+                        existing.max_concurrent += (ep.max_concurrent || 0);
+                        // Update health if any node is healthy
+                        if (ep.healthy) {
+                            existing.healthy = true;
+                        }
+                    }
+                });
+            });
+
+            if (endpointMap.size === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">暂无端点数据</td></tr>';
+                return;
+            }
+
+            const limit = 10;
+            let count = 0;
+            tbody.innerHTML = Array.from(endpointMap.values())
+                .filter(() => count++ < limit)
+                .map(ep => {
+                    const healthBadge = ep.healthy
+                        ? '<span class="badge badge-healthy">健康</span>'
+                        : '<span class="badge badge-unhealthy">异常</span>';
+                    const nodePath = ep.node_path || '';
+                    const targetUrl = 'http://127.0.0.1:' + businessPort + encodeURI(nodePath);
+                    const nodeText = ep.nodes.length + ' 个节点' + (ep.nodes.some(n => n.is_local) ? ' (含本节点)' : '');
+
+                    if (!nodePath) {
+                        return '<tr><td class="path-cell" style="color:#888;">无路径</td><td>' + nodeText + '</td><td>' + healthBadge + '</td><td>-</td></tr>';
+                    }
+
+                    const loadPercent = ep.max_concurrent > 0 ? Math.round((ep.active / ep.max_concurrent) * 100) : 0;
+                    const loadClass = loadPercent > 80 ? 'danger' : loadPercent > 50 ? 'warning' : '';
+                    const loadBar = '<div style="display:flex;align-items:center;gap:0.5rem;"><span>' + ep.active + '/' + ep.max_concurrent + '</span><div class="load-bar"><div class="load-fill ' + loadClass + '" style="width:' + loadPercent + '%"></div></div></div>';
+
+                    return '<tr>' +
+                        '<td style="display:flex;align-items:center;gap:0.5rem;">' +
+                            '<a href="' + targetUrl + '" target="_blank" style="color:var(--accent);font-family:monospace;text-decoration:none;">' + escapeHtml(nodePath) + '</a>' +
+                            '<button onclick="window.open(\'' + targetUrl.replace(/'/g, "\\'") + '\', \'_blank\')" style="background:var(--accent);color:white;border:none;padding:0.15rem 0.4rem;border-radius:3px;cursor:pointer;font-size:0.65rem;">打开</button>' +
+                        '</td>' +
+                        '<td>' + nodeText + '</td>' +
+                        '<td>' + healthBadge + '</td>' +
+                        '<td>' + loadBar + '</td>' +
+                        '</tr>';
+                }).join('');
+        }
+
+        function renderEndpoints(nodes) {
+            const tbody = document.getElementById('endpoints-tbody');
+            if (!nodes || nodes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无端点数据</td></tr>';
+                return;
+            }
+
+            // 按路径聚合端点
+            const endpointMap = new Map();
+            nodes.forEach(node => {
+                (node.endpoints || []).forEach(ep => {
+                    const key = ep.node_path;
+                    if (!endpointMap.has(key)) {
+                        endpointMap.set(key, {
+                            node_path: ep.node_path,
+                            service_id: ep.service_id,
+                            description: ep.description,
+                            nodes: []
+                        });
+                    }
+                    endpointMap.get(key).nodes.push({
+                        node_id: node.node_id,
+                        is_local: node.is_local,
+                        healthy: ep.healthy,
+                        active: ep.active,
+                        queue_len: ep.queue_len,
+                        max_concurrent: ep.max_concurrent
+                    });
+                });
+            });
+
+            if (endpointMap.size === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无端点数据</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = Array.from(endpointMap.values()).map(ep => {
+                const healthBadge = ep.nodes.some(n => n.healthy)
+                    ? '<span class="badge badge-healthy">健康</span>'
+                    : '<span class="badge badge-unhealthy">异常</span>';
+
+                const nodeBadges = ep.nodes.map(n => {
+                    const loadPercent = n.max_concurrent > 0
+                        ? Math.round((n.active / n.max_concurrent) * 100)
+                        : 0;
+                    const loadClass = loadPercent > 80 ? 'danger' : loadPercent > 50 ? 'warning' : '';
+                    const loadBar = '<div class="load-bar"><div class="load-fill ' + loadClass + '" style="width:' + loadPercent + '%"></div></div>';
+                    const localMark = n.is_local ? ' (本)' : '';
+                    return '<div class="node-badge' + (n.is_local ? ' local' : '') + '" title="' + escapeHtml(n.node_id) + '">' +
+                        '<span>' + escapeHtml(n.node_id.substring(0, 10)) + localMark + '</span>' +
+                        '<span>' + n.active + '/' + n.max_concurrent + '</span>' +
+                        loadBar +
+                        '</div>';
+                }).join('');
+
+                const totalActive = ep.nodes.reduce((sum, n) => sum + n.active, 0);
+                const totalMax = ep.nodes.reduce((sum, n) => sum + n.max_concurrent, 0);
+                const totalLoadPercent = totalMax > 0 ? Math.round((totalActive / totalMax) * 100) : 0;
+                const loadClass = totalLoadPercent > 80 ? 'danger' : totalLoadPercent > 50 ? 'warning' : '';
+                const totalLoadBar = '<div class="load-bar"><div class="load-fill ' + loadClass + '" style="width:' + totalLoadPercent + '%"></div></div>';
+
+                const nodePath = ep.node_path || '';
+                const targetUrl = 'http://127.0.0.1:' + businessPort + encodeURI(nodePath);
+
+                return '<tr>' +
+                    '<td style="display:flex;align-items:center;gap:0.5rem;">' +
+                        '<a href="' + targetUrl + '" target="_blank" style="color:var(--accent);font-family:monospace;text-decoration:none;">' + escapeHtml(nodePath) + '</a>' +
+                        '<button onclick="window.open(\'' + targetUrl.replace(/'/g, "\\'") + '\', \'_blank\')" style="background:var(--accent);color:white;border:none;padding:0.15rem 0.4rem;border-radius:3px;cursor:pointer;font-size:0.65rem;">打开</button>' +
+                    '</td>' +
+                    '<td><code style="font-size:0.7rem">' + escapeHtml(ep.service_id || '-') + '</code></td>' +
+                    '<td><div class="node-count">' + nodeBadges + '</div></td>' +
+                    '<td>' + healthBadge + '</td>' +
+                    '<td><div style="display:flex;align-items:center;gap:0.5rem;"><span>' + totalActive + '/' + totalMax + '</span>' + totalLoadBar + '</div></td>' +
+                    '<td class="desc-cell" title="' + escapeHtml(ep.description || '') + '">' + escapeHtml(ep.description || '-') + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.getElementById('add-node-alert');
+            const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
+            alertDiv.innerHTML = '<div class="alert ' + alertClass + '">' + escapeHtml(message) + '</div>';
+            setTimeout(() => {
+                alertDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        async function handleAddNode(event) {
+            event.preventDefault();
+            const ipInput = document.getElementById('node-ip');
+            const addBtn = document.getElementById('add-btn');
+            const ip = ipInput.value.trim();
+
+            if (!ip) {
+                ipInput.classList.add('error');
+                showAlert('请输入 IP 地址', 'error');
+                return false;
+            }
+
+            // 简单的 IP 地址格式验证
+            const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+            if (!ipPattern.test(ip)) {
+                ipInput.classList.add('error');
+                showAlert('IP 地址格式不正确', 'error');
+                return false;
+            }
+
+            ipInput.classList.remove('error');
+            addBtn.disabled = true;
+            addBtn.textContent = '添加中...';
+
+            try {
+                const resp = await fetch(apiBase + '/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.text();
+                    throw new Error(err || '添加失败');
+                }
+
+                const data = await resp.json();
+                showAlert('节点已添加: ' + ip + (data.remote_node_id ? ' (' + data.remote_node_id + ')' : ''), 'success');
+                ipInput.value = '';
+
+                // 延迟刷新列表
+                setTimeout(fetchData, 500);
+            } catch (e) {
+                showAlert('添加失败: ' + e.message, 'error');
+            } finally {
+                addBtn.disabled = false;
+                addBtn.textContent = '添加节点';
+            }
+
+            return false;
+        }
+
+        function recordHistory(stats) {
+            history.timestamps.push(new Date());
+            history.activeRequests.push(stats.total_active);
+            history.queueLength.push(stats.total_queue_len);
+            history.clusterNodes.push(stats.cluster_nodes);
+            history.totalEndpoints.push(stats.total_endpoints);
+            if (history.timestamps.length > HISTORY_MAX) {
+                Object.keys(history).forEach(k => history[k].shift());
+            }
+        }
+
+        function renderAllCharts() {
+            drawChart('chart-active', history.activeRequests, '#3b82f6');
+            drawChart('chart-queue', history.queueLength, '#f59e0b');
+            drawChart('chart-nodes', history.clusterNodes, '#22c55e');
+            drawChart('chart-endpoints', history.totalEndpoints, '#8b5cf6');
+        }
+
+        function drawChart(canvasId, data, color) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            if (data.length < 2) return;
+            const max = Math.max(...data, 1);
+            const step = w / (data.length - 1);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            data.forEach((v, i) => {
+                const x = i * step;
+                const y = h - (v / max) * (h - 20);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.font = '12px monospace';
+            ctx.fillText(data[data.length - 1], 5, 15);
+        }
+
+        // 初始加载
+        fetchData();
+
+        // 每5秒自动刷新
+        refreshInterval = setInterval(fetchData, 5000);
+
+        // 页面可见性变化时暂停/恢复自动刷新
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(refreshInterval);
+            } else {
+                fetchData();
+                refreshInterval = setInterval(fetchData, 5000);
+            }
+        });
+    </script>
+</body>
+</html>

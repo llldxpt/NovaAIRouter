@@ -1,0 +1,231 @@
+# =============================================================================
+# Nova Airouter 配置文件
+# =============================================================================
+# 使用方法: ./novaairouter --config=example-config.yaml
+
+# =============================================================================
+# ⚠️ 最重要设置 (必须根据环境配置)
+# =============================================================================
+# 认证方式 (二选一):
+#   - 禁用认证: disable-admin-auth: true (开发/测试环境)
+#   - 启用认证: disable-admin-auth: false (生产环境)
+disable-admin-auth: true
+# api-key: "your-secret-api-key-change-this-in-production"
+
+# 日志级别: debug, info, warn, error
+log-level: "error"
+
+# =============================================================================
+# 基础配置
+# =============================================================================
+# 节点标识 (不设置则自动生成)
+# 示例: node-id: "node-1"
+# node-id: "node-1"
+
+# 监听地址 (默认: :15050)
+# listen-addr: ":15050"
+
+# Gossip 监听地址 (默认: :15052)
+# discovery-addr: ":15052"
+
+# =============================================================================
+# TLS/HTTPS 配置
+# =============================================================================
+# 启用 TLS (默认: false)
+# tls-enabled: false
+
+# TLS 证书文件路径
+# tls-cert-file: "/path/to/cert.pem"
+
+# TLS 私钥文件路径
+# tls-key-file: "/path/to/key.pem"
+
+# =============================================================================
+# 后端请求配置
+# =============================================================================
+# 每个端点的默认最大并发数
+# 说明: 同时向后端发送的最大请求数
+# 示例: default-max-concurrency: 10
+default-max-concurrency: 10
+
+# 队列最大容量
+# 说明: 当后端繁忙时，等待处理的最大请求数
+# 示例: queue-capacity: 1000
+queue-capacity: 1000
+
+# 后端调用超时
+# 说明: 单个请求向后端发送的超时
+# 示例: backend-timeout: 300s
+# 建议: 60s-300s，根据后端响应时间设置
+backend-timeout: 300s
+
+# 队列等待超时
+# 说明: 请求在队列中等待的最大时间
+# 示例: queue-timeout: 30s
+# 建议: 30s-60s
+queue-timeout: 300s
+
+# =============================================================================
+# 连接配置 (通常使用默认值)
+# =============================================================================
+# 转发连接建立超时
+# 示例: forward-connect-timeout: 10s
+
+# 转发读取超时
+# 说明: 对于流式响应，从首个字节开始计算
+# 示例: forward-read-timeout: 300s
+
+# 后端心跳超时 (健康检查)
+# 示例: heartbeat-timeout: 15s
+
+# =============================================================================
+# Gossip 集群配置 (多节点时需要)
+# =============================================================================
+# 状态广播间隔 (节点间共享负载状态)
+# 示例: gossip-state-interval: 3s
+
+# 元数据广播间隔 (节点间共享配置)
+# 示例: gossip-metadata-interval: 1h
+
+# 配置同步间隔
+# 示例: gossip-sync-interval: 10s
+
+# Gossip HTTP 请求超时
+# 示例: gossip-http-timeout: 2s
+
+# 节点探测间隔 (健康检查)
+# 示例: gossip-probe-interval: 1s
+
+# 节点探测超时
+# 示例: gossip-probe-timeout: 500ms
+
+# 怀疑倍数 (节点被标记故障前的探测失败次数)
+# 计算: 探测超时 * 怀疑倍数
+# 示例: gossip-suspicion-mult: 4
+
+# 重传倍数
+# 示例: gossip-retransmit-mult: 3
+
+# 同步对等节点超时
+# 示例: sync-peer-timeout: 30s
+
+# =============================================================================
+# 服务发现配置 (动态后端发现)
+# =============================================================================
+# 服务发现重试间隔
+# 示例: discovery-retry-interval: 5s
+
+# 服务发现轮询间隔
+# 示例: discovery-poll-interval: 100ms
+
+# 服务发现广播间隔
+# 示例: discovery-broadcast-interval: 30s
+
+# 服务发现节点超时
+# 示例: discovery-node-timeout: 60s
+
+# 最小广播间隔 (自适应调节)
+# 示例: discovery-min-broadcast-interval: 1s
+
+# 最大广播间隔 (自适应调节)
+# 示例: discovery-max-broadcast-interval: 30m
+
+# 广播退避倍数
+# 示例: discovery-backoff-multiplier: 1.5
+
+# 连续无响应次数阈值 (超过则减速)
+# 示例: discovery-no-response-threshold: 3
+
+# =============================================================================
+# 配置示例
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 示例1: 开发/测试环境 (禁用认证)
+# -----------------------------------------------------------------------------
+# disable-admin-auth: true
+# api-key: ""
+# log-level: "debug"
+# default-max-concurrency: 5
+# queue-capacity: 100
+# backend-timeout: 60s
+
+# -----------------------------------------------------------------------------
+# 示例2: 小型生产环境
+# -----------------------------------------------------------------------------
+# disable-admin-auth: false
+# api-key: "your-strong-api-key"
+# log-level: "info"
+# default-max-concurrency: 10
+# queue-capacity: 500
+# backend-timeout: 120s
+# queue-timeout: 30s
+
+# -----------------------------------------------------------------------------
+# 示例3: 大型生产环境 (高并发)
+# -----------------------------------------------------------------------------
+# disable-admin-auth: false
+# api-key: "your-strong-api-key"
+# log-level: "info"
+# default-max-concurrency: 100
+# queue-capacity: 10000
+# backend-timeout: 300s
+# queue-timeout: 60s
+# heartbeat-timeout: 15s
+# forward-connect-timeout: 5s
+# forward-read-timeout: 300s
+
+# -----------------------------------------------------------------------------
+# 示例4: 多节点集群
+# -----------------------------------------------------------------------------
+# 节点1:
+#   node-id: "cluster-node-1"
+#   listen-addr: ":15050"
+#   discovery-addr: ":15052"
+#   disable-admin-auth: false
+#   api-key: "cluster-shared-key"
+#   gossip-state-interval: 1s
+#   gossip-probe-interval: 500ms
+
+# 节点2:
+#   node-id: "cluster-node-2"
+#   listen-addr: ":15050"
+#   discovery-addr: ":15052"
+#   disable-admin-auth: false
+#   api-key: "cluster-shared-key"
+#   gossip-state-interval: 1s
+#   gossip-probe-interval: 500ms
+
+# 节点3:
+#   node-id: "cluster-node-3"
+#   listen-addr: ":15050"
+#   discovery-addr: ":15052"
+#   disable-admin-auth: false
+#   api-key: "cluster-shared-key"
+#   gossip-state-interval: 1s
+#   gossip-probe-interval: 500ms
+
+# -----------------------------------------------------------------------------
+# 示例5: 流式响应场景
+# -----------------------------------------------------------------------------
+# disable-admin-auth: false
+# api-key: "your-api-key"
+# log-level: "info"
+# default-max-concurrency: 20
+# queue-capacity: 200
+# backend-timeout: 600s
+# forward-connect-timeout: 10s
+# forward-read-timeout: 600s
+
+# -----------------------------------------------------------------------------
+# 示例6: 高可用场景 (快速失败)
+# -----------------------------------------------------------------------------
+# disable-admin-auth: false
+# api-key: "your-api-key"
+# log-level: "warn"
+# default-max-concurrency: 5
+# queue-capacity: 50
+# backend-timeout: 10s
+# queue-timeout: 10s
+# heartbeat-timeout: 5s
+# discovery-node-timeout: 10s
