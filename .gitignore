@@ -1,0 +1,43 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+gateway
+novaairouter
+
+# Test binaries
+integration.test.exe
+
+# Python virtualenv
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+node_*.log
+
+# Temporary files
+test_*.py
+test_*.go
+test_*.ps1
+test_send.ps1
+test_peers.ps1
+test_peers2.ps1
+test_broadcast.ps1
+test_plugin.ps1
+old/
+integration_test/
+
+# Build artifacts
+dist/
+build/
