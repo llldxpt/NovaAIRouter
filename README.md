@@ -1,6 +1,6 @@
 # NovaAI Gateway Router
 
-Go: 1.20+ | License: MIT | Version: v1.0.0
+Go: 1.20+ | License: Apache 2.0 | Version: v1.0.0 | Copyright 2026 firstarpc.com
 
 A decentralized, distributed AI Gateway cluster system designed for AI inference services. NovaAI Gateway provides service registration, automatic routing, health detection, load balancing, and distributed node synchronization via the Gossip protocol.
 
@@ -57,7 +57,7 @@ A decentralized, distributed AI Gateway cluster system designed for AI inference
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/novaairouter.git
+git clone https://github.com/llldxpt/NovaAIRouter.git
 cd novaairouter
 
 # Build the binary
@@ -258,7 +258,7 @@ go test ./tests/integration/...
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
