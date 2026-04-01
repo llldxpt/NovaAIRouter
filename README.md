@@ -1,5 +1,8 @@
 # NovaAI Gateway Router
 
+[![English](https://img.shields.io/badge-English-README-blue)](README.md)
+[![中文](https://img.shields.io/badge/中文-README-red)](README_zh.md)
+
 Go: 1.20+ | License: Apache 2.0 | Version: v1.0.0 | Copyright 2026 firstarpc.com
 
 A decentralized, distributed AI Gateway cluster system designed for AI inference services. NovaAI Gateway provides service registration, automatic routing, health detection, load balancing, and distributed node synchronization via the Gossip protocol.
