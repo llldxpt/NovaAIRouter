@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 
 // noProxyTransport disables proxy for all backend connections (backends are always local)
 var noProxyTransport = &http.Transport{
-	Proxy:               nil,
+	Proxy:               func(*http.Request) (*url.URL, error) { return nil, nil },
 	MaxIdleConns:        100,
 	MaxIdleConnsPerHost: 10,
 	IdleConnTimeout:     90 * time.Second,
@@ -32,6 +33,7 @@ type PoolMetrics struct {
 
 type RequestPool struct {
 	path            string
+	serviceID       string
 	targetURL       string
 	maxConcur       int32
 	queue           chan *queueRequest
@@ -50,17 +52,10 @@ type RequestPool struct {
 }
 
 type worker struct {
-	id         int
-	pool       *RequestPool
-	task       chan *queueRequest
-	modeSwitch chan string
-	running    chan struct{}
+	id      int
+	pool    *RequestPool
+	running chan struct{}
 }
-
-const (
-	ModePush = "push"
-	ModePull = "pull"
-)
 
 type queueRequest struct {
 	W    http.ResponseWriter
@@ -76,6 +71,14 @@ type PoolManager struct {
 	backendTimeout time.Duration
 	log            zerolog.Logger
 	mu             sync.RWMutex
+
+	// 远程节点飞行中请求计数器，key = nodeID + "|" + nodePath
+	remoteCounters   map[string]*int32
+	remoteCountersMu sync.RWMutex
+
+	// 广播时刻的本机 localActive 快照，key = nodeID + "|" + nodePath
+	remoteSnapshots   map[string]int32
+	remoteSnapshotsMu sync.RWMutex
 }
 
 func NewManager(maxConcur int, backendTimeout time.Duration, log zerolog.Logger) *PoolManager {
@@ -84,24 +87,88 @@ func NewManager(maxConcur int, backendTimeout time.Duration, log zerolog.Logger)
 
 func NewManagerWithQueueCapacity(maxConcur int, queueCapacity int, backendTimeout time.Duration, log zerolog.Logger) *PoolManager {
 	return &PoolManager{
-		pools:          make(map[string]map[string]*RequestPool),
-		maxConcur:      maxConcur,
-		queueCapacity:  queueCapacity,
-		backendTimeout: backendTimeout,
-		log:            log,
+		pools:           make(map[string]map[string]*RequestPool),
+		remoteCounters:  make(map[string]*int32),
+		remoteSnapshots: make(map[string]int32),
+		maxConcur:       maxConcur,
+		queueCapacity:   queueCapacity,
+		backendTimeout:  backendTimeout,
+		log:             log,
 	}
 }
 
-func (m *PoolManager) GetOrCreatePool(path, serviceID, targetURL string, maxConcur int) *RequestPool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if subMap, ok := m.pools[path]; ok {
-		if pool, ok := subMap[serviceID]; ok {
-			return pool
-		}
+// remoteKey 生成远程计数器的 key
+func remoteKey(nodeID, nodePath string) string {
+	return nodeID + "|" + nodePath
+}
+
+// IncRemoteActive 远程节点请求开始，飞行中计数 +1
+func (m *PoolManager) IncRemoteActive(nodeID, nodePath string) {
+	key := remoteKey(nodeID, nodePath)
+	m.remoteCountersMu.Lock()
+	if _, ok := m.remoteCounters[key]; !ok {
+		var zero int32
+		m.remoteCounters[key] = &zero
 	}
-	m.log.Error().Str("path", path).Str("serviceID", serviceID).Msg("Pool does not exist! Pool must be created at endpoint registration!")
-	return nil
+	ptr := m.remoteCounters[key]
+	m.remoteCountersMu.Unlock()
+	atomic.AddInt32(ptr, 1)
+}
+
+// DecRemoteActive 远程节点请求结束，飞行中计数 -1
+func (m *PoolManager) DecRemoteActive(nodeID, nodePath string) {
+	key := remoteKey(nodeID, nodePath)
+	m.remoteCountersMu.RLock()
+	ptr, ok := m.remoteCounters[key]
+	m.remoteCountersMu.RUnlock()
+	if ok {
+		atomic.AddInt32(ptr, -1)
+	}
+}
+
+// GetRemoteActive 获取指定远程节点端点的飞行中请求数
+func (m *PoolManager) GetRemoteActive(nodeID, nodePath string) int32 {
+	key := remoteKey(nodeID, nodePath)
+	m.remoteCountersMu.RLock()
+	ptr, ok := m.remoteCounters[key]
+	m.remoteCountersMu.RUnlock()
+	if !ok {
+		return 0
+	}
+	return atomic.LoadInt32(ptr)
+}
+
+// SnapshotRemoteActives 在广播前调用，将当前所有 remoteCounters 的值存入快照
+func (m *PoolManager) SnapshotRemoteActives() {
+	m.remoteCountersMu.RLock()
+	snapshots := make(map[string]int32, len(m.remoteCounters))
+	for key, ptr := range m.remoteCounters {
+		snapshots[key] = atomic.LoadInt32(ptr)
+	}
+	m.remoteCountersMu.RUnlock()
+
+	m.remoteSnapshotsMu.Lock()
+	m.remoteSnapshots = snapshots
+	m.remoteSnapshotsMu.Unlock()
+}
+
+// GetRemoteActiveSnapshot 获取上次广播时的 localActive 快照值
+func (m *PoolManager) GetRemoteActiveSnapshot(nodeID, nodePath string) int32 {
+	key := remoteKey(nodeID, nodePath)
+	m.remoteSnapshotsMu.RLock()
+	v := m.remoteSnapshots[key]
+	m.remoteSnapshotsMu.RUnlock()
+	return v
+}
+
+func (m *PoolManager) GetPool(path, serviceID string) (*RequestPool, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if subMap, ok := m.pools[path]; ok {
+		pool, ok := subMap[serviceID]
+		return pool, ok
+	}
+	return nil, false
 }
 
 func (m *PoolManager) CreatePool(path, serviceID, targetURL string, maxConcur int) {
@@ -119,19 +186,9 @@ func (m *PoolManager) CreatePool(path, serviceID, targetURL string, maxConcur in
 		return
 	}
 
-	pool := NewRequestPool(path, targetURL, maxConcur, m.queueCapacity, m.backendTimeout, m.log)
+	pool := NewRequestPool(path, serviceID, targetURL, maxConcur, m.queueCapacity, m.backendTimeout, m.log)
 	m.pools[path][serviceID] = pool
 	m.log.Info().Str("path", path).Str("serviceID", serviceID).Int("maxConcur", maxConcur).Int("queueCapacity", m.queueCapacity).Msg("Created pool at endpoint registration")
-}
-
-func (m *PoolManager) GetPool(path, serviceID string) (*RequestPool, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if subMap, ok := m.pools[path]; ok {
-		pool, ok := subMap[serviceID]
-		return pool, ok
-	}
-	return nil, false
 }
 
 func (m *PoolManager) RemovePool(path, serviceID string) {
@@ -188,7 +245,7 @@ func (m *PoolManager) ShutdownAll() {
 	}
 }
 
-func NewRequestPool(path, targetURL string, maxConcur int, queueCapacity int, backendTimeout time.Duration, log zerolog.Logger) *RequestPool {
+func NewRequestPool(path, serviceID, targetURL string, maxConcur int, queueCapacity int, backendTimeout time.Duration, log zerolog.Logger) *RequestPool {
 	// 确保 maxConcur 至少为 1（修复 maxConcur=0 边界问题）
 	if maxConcur < 1 {
 		maxConcur = 1
@@ -196,6 +253,7 @@ func NewRequestPool(path, targetURL string, maxConcur int, queueCapacity int, ba
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &RequestPool{
 		path:           path,
+		serviceID:      serviceID,
 		targetURL:      targetURL,
 		maxConcur:      int32(maxConcur),
 		queue:          make(chan *queueRequest, queueCapacity),
@@ -213,78 +271,41 @@ func NewRequestPool(path, targetURL string, maxConcur int, queueCapacity int, ba
 
 	for i := 0; i < maxConcur; i++ {
 		w := &worker{
-			id:         i,
-			pool:       p,
-			task:       make(chan *queueRequest, 1),
-			modeSwitch: make(chan string, 1),
-			running:    make(chan struct{}),
+			id:      i,
+			pool:    p,
+			running: make(chan struct{}),
 		}
 		p.workers[i] = w
 		atomic.AddInt32(&p.workerCount, 1)
 		p.workerWG.Add(1)
-		go w.run(ModePull)
+		go w.run()
 	}
 
 	log.Info().Str("path", path).Int("maxConcur", maxConcur).Int("queue_cap", cap(p.queue)).Msg("Created new request pool with workers")
 	return p
 }
 
-func (w *worker) run(initialMode string) {
+func (w *worker) run() {
 	defer w.pool.workerWG.Done()
-	currentMode := initialMode
-	w.pool.log.Info().Str("mode", currentMode).Int("worker_id", w.id).Msg("Worker started")
+	w.pool.log.Info().Int("worker_id", w.id).Msg("Worker started")
 
 	for {
-		if currentMode == ModePull {
-			select {
-			case <-w.running:
+		select {
+		case <-w.running:
+			return
+		case <-w.pool.context.Done():
+			return
+		case req, ok := <-w.pool.queue:
+			if !ok {
 				return
-			case <-w.pool.context.Done():
-				return
-			case req, ok := <-w.pool.queue:
-				if !ok {
-					return
-				}
-				atomic.AddInt32(&w.pool.activeCount, 1)
-				w.pool.notifyMetricsChanged()
-				atomic.AddInt32(&w.pool.waitingCount, -1)
-				w.pool.notifyMetricsChanged()
-				w.processRequest(req)
-
-				if len(w.pool.queue) > 0 {
-					continue
-				} else {
-					atomic.AddInt32(&w.pool.activeCount, -1)
-					w.pool.notifyMetricsChanged()
-					currentMode = ModePush
-				}
-			case newMode := <-w.modeSwitch:
-				currentMode = newMode
 			}
-		} else {
-			select {
-			case <-w.running:
-				return
-			case <-w.pool.context.Done():
-				return
-			case req := <-w.task:
-				atomic.AddInt32(&w.pool.activeCount, 1)
-				w.pool.notifyMetricsChanged()
-				atomic.AddInt32(&w.pool.waitingCount, -1)
-				w.pool.notifyMetricsChanged()
-				w.processRequest(req)
-
-				if len(w.pool.queue) > 0 {
-					atomic.AddInt32(&w.pool.activeCount, -1)
-					w.pool.notifyMetricsChanged()
-					currentMode = ModePull
-				} else {
-					atomic.AddInt32(&w.pool.activeCount, -1)
-					w.pool.notifyMetricsChanged()
-				}
-			case newMode := <-w.modeSwitch:
-				currentMode = newMode
-			}
+			atomic.AddInt32(&w.pool.activeCount, 1)
+			w.pool.notifyMetricsChanged()
+			atomic.AddInt32(&w.pool.waitingCount, -1)
+			w.pool.notifyMetricsChanged()
+			w.processRequest(req)
+			atomic.AddInt32(&w.pool.activeCount, -1)
+			w.pool.notifyMetricsChanged()
 		}
 	}
 }
@@ -338,65 +359,13 @@ func (p *RequestPool) ServeWithHeaders(ctx context.Context, w http.ResponseWrite
 	atomic.AddInt32(&p.waitingCount, 1)
 	p.notifyMetricsChanged()
 
-	pushed := false
-	notifiedWorkerIdx := -1
-	count := atomic.LoadInt32(&p.workerCount)
-	p.log.Info().Int("worker_count", int(count)).Msg("ServeWithHeaders: trying to push to workers")
-	for i := 0; i < int(count); i++ {
-		w := p.workers[i]
-		select {
-		case w.task <- req:
-			pushed = true
-			notifiedWorkerIdx = i
-			// Notify worker to switch to ModePush so it reads from task channel
-			select {
-			case w.modeSwitch <- ModePush:
-			default:
-			}
-			p.log.Info().Int("worker_idx", i).Msg("ServeWithHeaders: pushed to worker, returning")
-			goto DONE
-		default:
-			continue
-		}
-	}
-	p.log.Info().Msg("ServeWithHeaders: could not push to any worker, trying queue")
-
-DONE:
-	if !pushed {
-		p.log.Info().Msg("ServeWithHeaders: putting request in queue")
-		select {
-		case p.queue <- req:
-			if len(p.queue) > 0 {
-				for i := 0; i < int(count); i++ {
-					if i == notifiedWorkerIdx {
-						continue
-					}
-					w := p.workers[i]
-					select {
-					case w.modeSwitch <- ModePull:
-					default:
-					}
-				}
-			}
-		default:
-			atomic.AddInt32(&p.waitingCount, -1)
-			p.notifyMetricsChanged()
-			http.Error(w, "Service Unavailable - Queue Full", http.StatusServiceUnavailable)
-			return fmt.Errorf("queue full")
-		}
-	} else {
-		if len(p.queue) > 0 && notifiedWorkerIdx >= 0 {
-			for i := 0; i < int(count); i++ {
-				if i == notifiedWorkerIdx {
-					continue
-				}
-				w := p.workers[i]
-				select {
-				case w.modeSwitch <- ModePull:
-				default:
-				}
-			}
-		}
+	select {
+	case p.queue <- req:
+	default:
+		atomic.AddInt32(&p.waitingCount, -1)
+		p.notifyMetricsChanged()
+		http.Error(w, "Service Unavailable - Queue Full", http.StatusServiceUnavailable)
+		return fmt.Errorf("queue full")
 	}
 
 	select {
@@ -429,15 +398,7 @@ func (p *RequestPool) forwardRequestWithHeaders(ctx context.Context, w http.Resp
 		}
 	}
 
-	p.log.Info().Str("url", url).Msg("forwardRequestWithHeaders: calling client.Do")
 	resp, err := p.client.Do(req)
-	// 检查 context 是否已取消
-	if ctx.Err() != nil {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return
-	}
 	p.log.Info().Str("url", url).Err(err).Msg("forwardRequestWithHeaders: client.Do returned")
 	if err != nil {
 		p.log.Error().Err(err).Msg("Failed to forward request")
@@ -487,6 +448,11 @@ func (p *RequestPool) forwardRequestWithHeaders(ctx context.Context, w http.Resp
 		}
 	}
 	io.Copy(w, resp.Body)
+}
+
+// EpID 返回该 pool 对应的 serviceID（即 epID）
+func (p *RequestPool) EpID() string {
+	return p.serviceID
 }
 
 func (p *RequestPool) GetMetrics() *PoolMetrics {

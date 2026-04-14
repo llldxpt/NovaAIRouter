@@ -84,36 +84,19 @@ func (s *AdminServer) handleGlobal(w http.ResponseWriter, r *http.Request) {
 		"path_infos": []map[string]interface{}{},
 	}
 	
-	pathInfosLocal := make(map[string]map[string]interface{})
+	// 本机节点：每个后端单独输出一条，不聚合，便于 webui 分开展示
 	for _, ep := range localEndpoints {
-		if _, exists := pathInfosLocal[ep.NodePath]; !exists {
-			pathInfosLocal[ep.NodePath] = map[string]interface{}{
-				"path":            ep.NodePath,
-				"service_path":    ep.ServicePath,
-				"description":     ep.Description,
-				"max_concurrent":  int32(0),
-				"plugin":          false,
-				"active":          int32(0),
-				"queue_len":       int32(0),
-				"healthy":         true,
-			}
-		}
-		info := pathInfosLocal[ep.NodePath]
-		if mc, ok := info["max_concurrent"].(int32); ok {
-			info["max_concurrent"] = mc + ep.MaxConcurrent
-		}
-		if ep.Plugin {
-			info["plugin"] = true
-		}
-		if active, ok := info["active"].(int32); ok {
-			info["active"] = active + ep.Active
-		}
-		if ql, ok := info["queue_len"].(int32); ok {
-			info["queue_len"] = ql + ep.QueueLen
-		}
-	}
-	for _, info := range pathInfosLocal {
-		localNode["path_infos"] = append(localNode["path_infos"].([]map[string]interface{}), info)
+		localNode["path_infos"] = append(localNode["path_infos"].([]map[string]interface{}), map[string]interface{}{
+			"path":           ep.NodePath,
+			"service_path":   ep.ServicePath,
+			"ep_id":          ep.EpID,
+			"description":    ep.Description,
+			"max_concurrent": ep.MaxConcurrent,
+			"plugin":         ep.Plugin,
+			"active":         ep.Active,
+			"queue_len":      ep.QueueLen,
+			"healthy":        ep.Healthy,
+		})
 	}
 	allNodes = append(allNodes, localNode)
 
@@ -249,7 +232,6 @@ func (s *AdminServer) buildEndpointDetail(path string, healthyOnly bool, localEn
 				Plugin:        ep.Plugin,
 				MaxConcurrent: ep.MaxConcurrent,
 			})
-			break
 		}
 	}
 
@@ -415,13 +397,14 @@ func (s *AdminServer) handlePostEndpoints(w http.ResponseWriter, r *http.Request
 
 		// 使用 poolMgr 创建 pool，设置正确的 maxConcurrent
 		if s.poolMgr != nil {
-			s.poolMgr.CreatePool(ep.NodePath, ep.ServiceID, targetURL, int(ep.MaxConcurrent))
+			s.poolMgr.CreatePool(ep.NodePath, ep.EpID, targetURL, int(ep.MaxConcurrent))
 
 			// 设置 metrics 回调，实时更新 endpoint 状态
-			if requestPool, ok := s.poolMgr.GetPool(ep.NodePath, ep.ServiceID); ok {
+			if requestPool, ok := s.poolMgr.GetPool(ep.NodePath, ep.EpID); ok {
 				nodePath := ep.NodePath
+				epID := ep.EpID
 				requestPool.SetMetricsCallback(func(active, queueLen int32) {
-					s.registry.UpdateEndpointMetrics(nodePath, active, queueLen)
+					s.registry.UpdateEndpointMetricsByEpID(nodePath, epID, active, queueLen)
 				})
 			}
 
@@ -472,17 +455,17 @@ func (s *AdminServer) handleDeleteEndpoints(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// 在删除前收集受影响的 nodePath 和 serviceID，用于清理 pool
+	// 在删除前收集受影响的 nodePath 和 epID，用于清理 pool
 	queryNodePath := r.URL.Query().Get("path")
 	type poolKey struct {
-		path      string
-		serviceID string
+		path string
+		epID string
 	}
 	var deletedPools []poolKey
 	for _, ep := range s.registry.ListEndpoints() {
 		if ep.ServiceID == decodedServiceID {
 			if queryNodePath == "" || ep.NodePath == queryNodePath {
-				deletedPools = append(deletedPools, poolKey{path: ep.NodePath, serviceID: ep.ServiceID})
+				deletedPools = append(deletedPools, poolKey{path: ep.NodePath, epID: ep.EpID})
 			}
 		}
 	}
@@ -507,8 +490,8 @@ func (s *AdminServer) handleDeleteEndpoints(w http.ResponseWriter, r *http.Reque
 	// 清理已删除端点的 pool
 	if s.poolMgr != nil {
 		for _, pk := range deletedPools {
-			s.poolMgr.RemovePool(pk.path, pk.serviceID)
-			s.log.Info().Str("path", pk.path).Str("serviceID", pk.serviceID).Msg("Removed pool for deleted endpoint")
+			s.poolMgr.RemovePool(pk.path, pk.epID)
+			s.log.Info().Str("path", pk.path).Str("epID", pk.epID).Msg("Removed pool for deleted endpoint")
 		}
 	}
 

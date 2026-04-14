@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,12 +17,11 @@ import (
 	"novaairouter/internal/models"
 	"novaairouter/internal/pool"
 	"novaairouter/internal/registry"
-	"novaairouter/internal/utils"
 )
 
 // noProxyTransport disables proxy for all backend connections
 var noProxyTransport = &http.Transport{
-	Proxy: nil,
+	Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
 }
 
 var (
@@ -50,6 +51,27 @@ func New(cfg *config.Config, reg *registry.Registry, poolMgr *pool.PoolManager, 
 	}
 }
 
+// HandleLocalRequestByPath 根据 nodePath 用负载均衡选择 pool 处理本地请求
+func (f *Forwarder) HandleLocalRequestByPath(w http.ResponseWriter, r *http.Request, path, nodePath string, startTime time.Time) {
+	// 用 selectPoolByLoad 在 nodePath 下所有 pool 中选负载最低的
+	selectedPool := f.selectPoolByLoad(nodePath, "", nil)
+	if selectedPool == nil {
+		f.log.Error().Str("nodePath", nodePath).Msg("No pool available for nodePath")
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// 找到 pool 对应的 endpoint
+	ep, ok := f.registry.GetEndpointByEpID(nodePath, selectedPool.EpID())
+	if !ok {
+		f.log.Error().Str("nodePath", nodePath).Str("epID", selectedPool.EpID()).Msg("Endpoint not found for selected pool")
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	f.HandleLocalRequest(w, r, path, ep, startTime)
+}
+
 // HandleLocalRequest 处理本地请求
 func (f *Forwarder) HandleLocalRequest(w http.ResponseWriter, r *http.Request, path string, ep *models.LocalEndpoint, startTime time.Time) {
 	err := f.HandleLocalRequestWithError(w, r, path, ep, startTime)
@@ -64,57 +86,14 @@ func (f *Forwarder) HandleLocalRequest(w http.ResponseWriter, r *http.Request, p
 func (f *Forwarder) HandleLocalRequestWithError(w http.ResponseWriter, r *http.Request, path string, ep *models.LocalEndpoint, startTime time.Time) error {
 	f.log.Debug().Str("path", path).Str("ep.NodePath", ep.NodePath).Msg("handleLocalRequestWithError called")
 
-	servicePort := utils.ExtractPortFromServicePath(ep.ServicePath)
-	servicePathBase := utils.ExtractBaseFromServicePath(ep.ServicePath)
-	nodePath := ep.NodePath
-
-	hasTrailingSlash := strings.HasSuffix(nodePath, "/")
-	var targetPath string
-	if hasTrailingSlash {
-		targetPath = strings.TrimPrefix(path, nodePath)
-	} else {
-		targetPath = strings.TrimPrefix(path, nodePath)
-		if targetPath == "" {
-			targetPath = "/"
-		}
-	}
-
-	targetURL := fmt.Sprintf("http://localhost:%d%s%s", servicePort, servicePathBase, targetPath)
-	
-	totalMaxConcurrent := int32(0)
-	
-	// 使用已获取的 ep 的 NodePath 来查找 endpoint
-	// 注意：path 是完整请求路径（如 /v1/concurrent/chat/completions）
-	// 而 ep.NodePath 是注册的端点路径（如 /v1/concurrent/）
-	localEp, localOk := f.registry.GetEndpoint(ep.NodePath)
-	if localOk && localEp.Healthy && localEp.MaxConcurrent > 0 {
-		totalMaxConcurrent += localEp.MaxConcurrent
-	}
-	
-	remoteNodes := f.registry.GetHealthyNodesForPath(ep.NodePath)
-	for _, node := range remoteNodes {
-		if state, ok := node.EndpointStates[ep.NodePath]; ok && state.Healthy {
-			if state.MaxConcurrent > 0 {
-				totalMaxConcurrent += state.MaxConcurrent
-			}
-		}
-	}
-	
-	if totalMaxConcurrent < 1 {
-		totalMaxConcurrent = 1
-	}
-	
-	// 使用 ep.NodePath 和 ep.ServiceID 作为 pool key，这样同一个endpoint下的不同请求路径会复用同一个 pool
-	f.log.Info().Str("ep.NodePath", ep.NodePath).Str("ep.ServiceID", ep.ServiceID).Str("path", path).Msg("=== Creating pool with ep.NodePath ===")
-	requestPool := f.poolMgr.GetOrCreatePool(ep.NodePath, ep.ServiceID, targetURL, int(totalMaxConcurrent))
-	if requestPool == nil {
-		f.log.Error().Str("nodePath", ep.NodePath).Msg("Pool is nil! Pool must be created at endpoint registration!")
+	requestPool, ok := f.poolMgr.GetPool(ep.NodePath, ep.EpID)
+	if !ok || requestPool == nil {
+		f.log.Error().Str("nodePath", ep.NodePath).Str("epID", ep.EpID).Msg("Pool not found! Pool must be created at endpoint registration!")
 		http.Error(w, "Service Unavailable - Pool not configured", http.StatusServiceUnavailable)
 		return ErrBackendFailed
 	}
-	// 从同 path 的所有 pool 中选择负载最低的
-	requestPool = f.selectPool(ep.NodePath, requestPool)
-	f.log.Info().Msg("Got request pool")
+
+	f.log.Info().Str("nodePath", ep.NodePath).Str("epID", ep.EpID).Int32("maxConcurrent", ep.MaxConcurrent).Msg("Using pool for endpoint")
 
 	responseHeaders := make(http.Header)
 	f.log.Info().Msg("Calling ServeWithHeaders")
@@ -174,8 +153,8 @@ func (f *Forwarder) HandleLocalRequestWithError(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// selectPool 从同 path 的所有 pool 中选择负载最低的一个
-func (f *Forwarder) selectPool(nodePath string, defaultPool *pool.RequestPool) *pool.RequestPool {
+// selectPoolByLoad 根据负载选择 pool，负载相同时按 maxConcurrent 加权随机
+func (f *Forwarder) selectPoolByLoad(nodePath, currentServiceID string, defaultPool *pool.RequestPool) *pool.RequestPool {
 	pools := f.poolMgr.GetPoolsByPath(nodePath)
 	if len(pools) == 0 {
 		return defaultPool
@@ -184,22 +163,61 @@ func (f *Forwarder) selectPool(nodePath string, defaultPool *pool.RequestPool) *
 		return pools[0]
 	}
 
-	// 选择负载最低的 pool（负载 = active + queueLen）
-	var bestPool *pool.RequestPool
-	bestLoad := int32(1 << 30)
+	type poolLoad struct {
+		p    *pool.RequestPool
+		load float64
+	}
+
+	items := make([]poolLoad, 0, len(pools))
 	for _, p := range pools {
 		m := p.GetMetrics()
-		load := m.Active + m.QueueLen
-		if load < bestLoad {
-			bestLoad = load
-			bestPool = p
+		maxConcur := float64(m.MaxConcurrent)
+		if maxConcur <= 0 {
+			maxConcur = 1
+		}
+		items = append(items, poolLoad{p: p, load: float64(m.Active+m.QueueLen) / maxConcur})
+	}
+
+	// 找最低负载
+	bestLoad := items[0].load
+	for _, item := range items[1:] {
+		if item.load < bestLoad {
+			bestLoad = item.load
 		}
 	}
-	if bestPool == nil {
-		return defaultPool
+
+	// 收集负载最低的 pool 集合（容忍 0.001 误差）
+	var candidates []*pool.RequestPool
+	var weights []int32
+	for _, item := range items {
+		if item.load <= bestLoad+0.001 {
+			candidates = append(candidates, item.p)
+			m := item.p.GetMetrics()
+			w := m.MaxConcurrent
+			if w <= 0 {
+				w = 1
+			}
+			weights = append(weights, w)
+		}
 	}
-	f.log.Debug().Str("nodePath", nodePath).Int("pool_count", len(pools)).Int32("best_load", bestLoad).Msg("Selected pool with lowest load")
-	return bestPool
+
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+
+	// 按 maxConcurrent 加权随机
+	total := int32(0)
+	for _, w := range weights {
+		total += w
+	}
+	r := rand.Int31n(total)
+	for i, w := range weights {
+		r -= w
+		if r < 0 {
+			return candidates[i]
+		}
+	}
+	return candidates[len(candidates)-1]
 }
 
 // HandleForwardedRequest 处理转发请求
@@ -217,8 +235,13 @@ func (f *Forwarder) HandleForwardedRequestWithError(w http.ResponseWriter, r *ht
 	forwardedBy := r.Header.Get("X-Forwarded-By")
 	if strings.Contains(forwardedBy, f.config.NodeID) {
 		f.log.Warn().Str("path", path).Msg("Loop detected")
+		http.Error(w, "Loop detected", http.StatusBadGateway)
 		return ErrForwardFailed
 	}
+
+	// 飞行中计数 +1，请求结束时 -1
+	f.poolMgr.IncRemoteActive(node.NodeID, node.NodePath)
+	defer f.poolMgr.DecRemoteActive(node.NodeID, node.NodePath)
 
 	nodePath := node.NodePath
 	servicePathBase := node.ServicePath
@@ -278,6 +301,7 @@ func (f *Forwarder) HandleForwardedRequestWithError(w http.ResponseWriter, r *ht
 
 	resp, err := f.httpClient.Do(req)
 	if err != nil {
+		f.log.Error().Err(err).Str("targetURL", targetURL).Msg("httpClient.Do failed")
 		return ErrForwardFailed
 	}
 	defer resp.Body.Close()

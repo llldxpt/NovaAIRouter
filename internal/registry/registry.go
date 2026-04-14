@@ -63,9 +63,19 @@ func (r *Registry) GetEndpoint(path string) (*models.LocalEndpoint, bool) {
 	return r.local.GetEndpoint(path)
 }
 
+// GetEndpointByEpID 根据 nodePath 和 EpID 精确获取本地端点
+func (r *Registry) GetEndpointByEpID(path, epID string) (*models.LocalEndpoint, bool) {
+	return r.local.GetEndpointByEpID(path, epID)
+}
+
 // ListEndpoints 列出所有本地端点
 func (r *Registry) ListEndpoints() []*models.LocalEndpoint {
 	return r.local.ListEndpoints()
+}
+
+// ListEndpointsByNodePath 列出指定 nodePath 下的所有本地端点
+func (r *Registry) ListEndpointsByNodePath(nodePath string) []*models.LocalEndpoint {
+	return r.local.ListEndpointsByNodePath(nodePath)
 }
 
 // GetAllLocalEndpoints 获取所有本地端点
@@ -86,6 +96,11 @@ func (r *Registry) UpdateHeartbeat(serviceID string, healthy bool) error {
 // UpdateEndpointMetrics 更新端点的活跃请求数和队列长度
 func (r *Registry) UpdateEndpointMetrics(nodePath string, active, queueLen int32) {
 	r.local.UpdateEndpointMetrics(nodePath, active, queueLen)
+}
+
+// UpdateEndpointMetricsByEpID 按 EpID 精确更新单个端点的活跃请求数和队列长度
+func (r *Registry) UpdateEndpointMetricsByEpID(nodePath, epID string, active, queueLen int32) {
+	r.local.UpdateEndpointMetricsByEpID(nodePath, epID, active, queueLen)
 }
 
 // CheckStaleEndpoints 检查过期端点
@@ -160,6 +175,30 @@ func (r *Registry) GetEndpointDescriptions() map[string]models.EndpointMetadata 
 // AddRemoteNode 添加远程节点
 func (r *Registry) AddRemoteNode(node *models.RemoteNode) {
 	r.remote.AddRemoteNode(node)
+}
+
+// AggregateLocalPathInfos 按 nodePath 聚合本地端点状态，用于 gossip 广播
+// 同一 nodePath 下多个后端：MaxConcurrent 累加，Healthy 只要有一个健康即为 true，Active/QueueLen 累加
+func (r *Registry) AggregateLocalPathInfos() map[string]*models.AggregatedPathInfo {
+	eps := r.local.ListEndpoints()
+	result := make(map[string]*models.AggregatedPathInfo)
+	for _, ep := range eps {
+		agg, ok := result[ep.NodePath]
+		if !ok {
+			agg = &models.AggregatedPathInfo{
+				NodePath: ep.NodePath,
+				Plugin:   ep.Plugin,
+			}
+			result[ep.NodePath] = agg
+		}
+		if ep.Healthy {
+			agg.Healthy = true
+			agg.MaxConcurrent += ep.MaxConcurrent
+		}
+		agg.Active += ep.Active
+		agg.QueueLen += ep.QueueLen
+	}
+	return result
 }
 
 // RemoveRemoteEndpoint 移除远程节点的端点

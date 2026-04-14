@@ -211,19 +211,18 @@ func (s *Sync) BroadcastState(states map[string]*EndpointMetrics) {
 // BroadcastSync 广播同步消息（只同步 node_path，不同步 service_path）
 // 收到同步的节点会将请求转发到原始节点，而不是直接访问后端服务
 func (s *Sync) BroadcastSync() {
-	endpoints := s.registry.ListEndpoints()
-	s.log.Info().Int("endpoint_count", len(endpoints)).Msg("Broadcasting sync")
-	pathInfos := make([]message.PathInfo, 0, len(endpoints))
-	for _, ep := range endpoints {
-		s.log.Info().Str("node_path", ep.NodePath).Str("service_path", ep.ServicePath).Msg("Syncing endpoint")
+	aggregated := s.registry.AggregateLocalPathInfos()
+	s.log.Info().Int("endpoint_count", len(aggregated)).Msg("Broadcasting sync")
+	pathInfos := make([]message.PathInfo, 0, len(aggregated))
+	for _, agg := range aggregated {
+		s.log.Info().Str("node_path", agg.NodePath).Int32("max_concurrent", agg.MaxConcurrent).Msg("Syncing endpoint")
 		pathInfos = append(pathInfos, message.PathInfo{
-			ServiceID:     ep.ServiceID,
-			NodePath:      ep.NodePath,
-			Active:        ep.Active,
-			QueueLen:      ep.QueueLen,
-			Healthy:       ep.Healthy,
-			MaxConcurrent: ep.MaxConcurrent,
-			Plugin:        ep.Plugin,
+			NodePath:      agg.NodePath,
+			Active:        agg.Active,
+			QueueLen:      agg.QueueLen,
+			Healthy:       agg.Healthy,
+			MaxConcurrent: agg.MaxConcurrent,
+			Plugin:        agg.Plugin,
 		})
 	}
 

@@ -197,18 +197,16 @@ func (g *GossipServer) handleGossipJoin(w http.ResponseWriter, r *http.Request) 
 }
 
 func (g *GossipServer) getLocalPathInfos() []message.PathInfo {
-	endpoints := g.registry.ListEndpoints()
-	pathInfos := make([]message.PathInfo, 0, len(endpoints))
-	for _, ep := range endpoints {
+	aggregated := g.registry.AggregateLocalPathInfos()
+	pathInfos := make([]message.PathInfo, 0, len(aggregated))
+	for _, agg := range aggregated {
 		pathInfos = append(pathInfos, message.PathInfo{
-			ServiceID:     ep.ServiceID,
-			ServicePath:   ep.ServicePath,
-			NodePath:      ep.NodePath,
-			Active:        ep.Active,
-			QueueLen:      ep.QueueLen,
-			Healthy:       ep.Healthy,
-			MaxConcurrent: ep.MaxConcurrent,
-			Plugin:        ep.Plugin,
+			NodePath:      agg.NodePath,
+			Active:        agg.Active,
+			QueueLen:      agg.QueueLen,
+			Healthy:       agg.Healthy,
+			MaxConcurrent: agg.MaxConcurrent,
+			Plugin:        agg.Plugin,
 		})
 	}
 	return pathInfos
@@ -550,17 +548,16 @@ func (g *GossipServer) postToPeerAsync(peerIP, path string, data []byte) {
 func (g *GossipServer) sendSyncToPeer(peerIP, peerNodeID string) {
 	g.log.Info().Str("peer_ip", peerIP).Str("peer_node_id", peerNodeID).Msg("Sending sync to peer after join")
 
-	endpoints := g.registry.ListEndpoints()
-	pathInfos := make([]message.PathInfo, 0, len(endpoints))
-	for _, ep := range endpoints {
+	aggregated := g.registry.AggregateLocalPathInfos()
+	pathInfos := make([]message.PathInfo, 0, len(aggregated))
+	for _, agg := range aggregated {
 		pathInfos = append(pathInfos, message.PathInfo{
-			ServicePath:   ep.ServicePath,
-			NodePath:      ep.NodePath,
-			Active:        ep.Active,
-			QueueLen:      ep.QueueLen,
-			Healthy:       ep.Healthy,
-			MaxConcurrent: ep.MaxConcurrent,
-			Plugin:        ep.Plugin,
+			NodePath:      agg.NodePath,
+			Active:        agg.Active,
+			QueueLen:      agg.QueueLen,
+			Healthy:       agg.Healthy,
+			MaxConcurrent: agg.MaxConcurrent,
+			Plugin:        agg.Plugin,
 		})
 	}
 

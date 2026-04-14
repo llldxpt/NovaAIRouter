@@ -31,6 +31,7 @@ type RemoteNode struct {
 	ServicePort          int
 	ServicePath          string
 	NodePath             string
+	EpID                 string // 仅本机节点使用，用于精确定位后端
 	EndpointStates       map[string]*EndpointState
 	EndpointDescriptions map[string]EndpointMetadata
 	LastSeen             time.Time

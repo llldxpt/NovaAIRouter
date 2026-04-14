@@ -6,6 +6,25 @@ import (
 	"novaairouter/internal/models"
 )
 
+// weightedRandomIndex 在权重列表中按权重随机选一个下标
+func weightedRandomIndex(weights []int32) int {
+	total := int32(0)
+	for _, w := range weights {
+		total += w
+	}
+	if total <= 0 {
+		return rand.Intn(len(weights))
+	}
+	r := rand.Int31n(total)
+	for i, w := range weights {
+		r -= w
+		if r < 0 {
+			return i
+		}
+	}
+	return len(weights) - 1
+}
+
 // DefaultMaxConcurrent 默认最大并发数
 const DefaultMaxConcurrent = 10
 
@@ -36,7 +55,12 @@ func (b *Balancer) SelectNode(nodes []*models.RemoteNode, path string) *models.R
 
 	scores := make([]nodeScore, 0, len(nodes))
 	for _, node := range nodes {
-		state := node.EndpointStates[path]
+		// EndpointStates key is nodePath, not request path — find the matching state
+		var state *models.EndpointState
+		for _, s := range node.EndpointStates {
+			state = s
+			break
+		}
 		if state == nil {
 			state = &models.EndpointState{
 				Active:        0,
@@ -75,18 +99,41 @@ func (b *Balancer) SelectNode(nodes []*models.RemoteNode, path string) *models.R
 		scores = append(scores, nodeScore{node: node, score: score})
 	}
 
-	// 选择负载最低的节点
-	var bestNode *models.RemoteNode
-	var bestScore float64 = -1
-
-	for _, ns := range scores {
-		if bestScore == -1 || ns.score < bestScore {
+	// 选出最低 score 的节点集合，在其中按 maxConcurrent 加权随机选一个
+	bestScore := scores[0].score
+	for _, ns := range scores[1:] {
+		if ns.score < bestScore {
 			bestScore = ns.score
-			bestNode = ns.node
 		}
 	}
 
-	return bestNode
+	// 收集所有 score 在 bestScore ±5% 范围内的节点（容忍随机扰动误差）
+	var candidates []nodeScore
+	for _, ns := range scores {
+		if ns.score <= bestScore*1.05+0.001 {
+			candidates = append(candidates, ns)
+		}
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0].node
+	}
+
+	// 按 maxConcurrent 加权随机
+	weights := make([]int32, len(candidates))
+	for i, ns := range candidates {
+		var state *models.EndpointState
+		for _, s := range ns.node.EndpointStates {
+			state = s
+			break
+		}
+		if state != nil && state.MaxConcurrent > 0 {
+			weights[i] = state.MaxConcurrent
+		} else {
+			weights[i] = int32(DefaultMaxConcurrent)
+		}
+	}
+	return candidates[weightedRandomIndex(weights)].node
 }
 
 

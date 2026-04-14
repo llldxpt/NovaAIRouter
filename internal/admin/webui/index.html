@@ -814,12 +814,14 @@
                     const desc = ep.description ? '<span>' + escapeHtml(ep.description) + '</span>' : '';
                     const nodePath = ep.node_path || ep.path || '';
                     const targetUrl = 'http://127.0.0.1:' + businessPort + encodeURI(nodePath);
+                    const servicePathLabel = ep.service_path ? '<span style="font-size:0.75rem;color:#888;">→ ' + escapeHtml(ep.service_path) + '</span>' : '';
                     if (!nodePath) {
                         return '<div class="endpoint-item"><div class="endpoint-path" style="color:#888;">无路径信息</div></div>';
                     }
                     return '<div class="endpoint-item">' +
                         '<div class="endpoint-path" style="display:flex;align-items:center;gap:0.5rem;">' +
                             '<a href="' + targetUrl + '" target="_blank" style="color:var(--accent);font-family:monospace;text-decoration:none;">' + escapeHtml(nodePath) + '</a>' +
+                            servicePathLabel +
                             '<button onclick="window.open(\'' + targetUrl.replace(/'/g, "\\'") + '\', \'_blank\')" style="background:var(--accent);color:white;border:none;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.7rem;">打开</button>' +
                         '</div>' +
                         '<div class="endpoint-meta">' +

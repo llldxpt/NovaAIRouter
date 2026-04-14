@@ -38,6 +38,32 @@ test_plugin.ps1
 old/
 integration_test/
 
+# Debug/test scripts
+check_*.py
+debug_*.py
+register_*.py
+run_test*.py
+search_log.py
+service_client_example.py
+kill_proc.py
+load_test/
+test/
+tests/
+
+# IDE tool directories
+.claude/
+.trae/
+
+# Windows artifacts
+nul
+
+# Local scripts and docs
+*.bat
+*.sh
+*.docx
+grafana-dashboard.json
+文档.md
+
 # Build artifacts
 dist/
 build/

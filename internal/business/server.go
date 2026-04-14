@@ -103,14 +103,9 @@ func (s *BusinessServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	case *models.RemoteNode:
 		s.log.Info().Str("node_id", v.NodeID).Str("address", v.Address).Str("node_path", v.NodePath).Msg("Got RemoteNode")
 		if v.NodeID == s.config.NodeID && v.Address == "127.0.0.1" {
-			s.log.Info().Str("node_path", v.NodePath).Msg("Local node detected, getting endpoint")
-			if localEp, ok := s.registry.GetEndpoint(v.NodePath); ok {
-				s.log.Info().Str("node_path", localEp.NodePath).Msg("Found local endpoint, calling HandleLocalRequest")
-				s.forwarder.HandleLocalRequest(w, r, r.URL.Path, localEp, time.Now())
-				return
-			} else {
-				s.log.Warn().Str("node_path", v.NodePath).Msg("Local endpoint not found!")
-			}
+			s.log.Info().Str("node_path", v.NodePath).Msg("Local node detected, selecting pool by load")
+			s.forwarder.HandleLocalRequestByPath(w, r, r.URL.Path, v.NodePath, time.Now())
+			return
 		}
 		s.forwarder.HandleForwardedRequest(w, r, r.URL.Path, v, time.Now())
 	}

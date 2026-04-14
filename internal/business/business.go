@@ -28,7 +28,7 @@ type BusinessServer struct {
 }
 
 func New(cfg *config.Config, reg *registry.Registry, poolMgr *pool.PoolManager, gossipServer *gossip.GossipServer, log zerolog.Logger) *BusinessServer {
-	router := router.New(cfg, reg, log)
+	router := router.New(cfg, reg, poolMgr, log)
 	balancer := balancer.New()
 	forwarder := forwarder.New(cfg, reg, poolMgr, log)
 

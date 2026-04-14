@@ -46,9 +46,10 @@ func (r *LocalRegistry) RegisterEndpoints(endpoints []*models.LocalEndpoint) (st
 	defer r.mu.Unlock()
 
 	for _, ep := range endpoints {
-		existingEp, exists := r.endpoints.Get(ep.NodePath)
-		if exists && ep.Plugin && existingEp.Plugin {
-			return "", fmt.Errorf("node_path %s already has a plugin registered", ep.NodePath)
+		for _, existingEp := range r.endpoints.List() {
+			if existingEp.NodePath == ep.NodePath && ep.Plugin && existingEp.Plugin {
+				return "", fmt.Errorf("node_path %s already has a plugin registered", ep.NodePath)
+			}
 		}
 	}
 
@@ -57,6 +58,7 @@ func (r *LocalRegistry) RegisterEndpoints(endpoints []*models.LocalEndpoint) (st
 
 	for _, ep := range endpoints {
 		ep.ServiceID = serviceID
+		ep.EpID = generateServiceID() // 每个后端独立的内部 ID
 		r.endpoints.Set(ep.NodePath, ep)
 		paths = append(paths, ep.NodePath)
 	}
@@ -80,7 +82,7 @@ func (r *LocalRegistry) RemoveByServiceID(serviceID string) int {
 	removedCount := 0
 	for _, ep := range eps {
 		if ep.ServiceID == serviceID {
-			r.endpoints.Delete(ep.NodePath)
+			r.endpoints.DeleteByServiceID(ep.NodePath, serviceID)
 			removedCount++
 		}
 	}
@@ -92,7 +94,7 @@ func (r *LocalRegistry) RemoveByServiceID(serviceID string) int {
 
 // RemoveByServiceIDAndPath 根据 service_id 和 path 移除单个端点
 func (r *LocalRegistry) RemoveByServiceIDAndPath(serviceID, nodePath string) int {
-	ep, exists := r.endpoints.Get(nodePath)
+	ep, exists := r.endpoints.GetByServiceID(nodePath, serviceID)
 	if !exists {
 		r.log.Warn().Str("service_id", serviceID).Str("path", nodePath).Msg("Endpoint not found")
 		return 0
@@ -101,7 +103,7 @@ func (r *LocalRegistry) RemoveByServiceIDAndPath(serviceID, nodePath string) int
 		r.log.Warn().Str("service_id", serviceID).Str("path", nodePath).Msg("Service ID mismatch, cannot delete endpoint")
 		return 0
 	}
-	r.endpoints.Delete(nodePath)
+	r.endpoints.DeleteByServiceID(nodePath, serviceID)
 	r.log.Info().Str("service_id", serviceID).Str("path", nodePath).Msg("Endpoint removed by service_id and path")
 	return 1
 }
@@ -110,9 +112,19 @@ func (r *LocalRegistry) RemoveByServiceIDAndPath(serviceID, nodePath string) int
 func (r *LocalRegistry) RemoveAllEndpoints() {
 	eps := r.endpoints.List()
 	for _, ep := range eps {
-		r.endpoints.Delete(ep.NodePath)
+		r.endpoints.DeleteByEpID(ep.NodePath, ep.EpID)
 	}
 	r.log.Info().Msg("All endpoints removed")
+}
+
+// GetEndpointByEpID 根据 EpID 精确获取本地端点
+func (r *LocalRegistry) GetEndpointByEpID(path, epID string) (*models.LocalEndpoint, bool) {
+	return r.endpoints.GetByEpID(path, epID)
+}
+
+// ListEndpointsByNodePath 获取指定 nodePath 下的所有本地端点
+func (r *LocalRegistry) ListEndpointsByNodePath(path string) []*models.LocalEndpoint {
+	return r.endpoints.ListByNodePath(path)
 }
 
 // GetEndpoint 获取本地端点
@@ -166,16 +178,34 @@ func (r *LocalRegistry) UpdateHeartbeat(serviceID string, healthy bool) error {
 	return nil
 }
 
-// UpdateEndpointMetrics 更新端点的活跃请求数和队列长度
+// UpdateEndpointMetrics 更新端点的活跃请求数和队列长度（按 nodePath，兼容旧调用）
 func (r *LocalRegistry) UpdateEndpointMetrics(nodePath string, active, queueLen int32) {
 	r.log.Debug().Str("nodePath", nodePath).Int32("active", active).Int32("queueLen", queueLen).Msg("UpdateEndpointMetrics called")
-	if ep, ok := r.endpoints.Get(nodePath); ok {
-		ep.Active = active
-		ep.QueueLen = queueLen
-		r.endpoints.Set(nodePath, ep)
-	} else {
+	found := false
+	for _, ep := range r.endpoints.List() {
+		if ep.NodePath == nodePath {
+			ep.Active = active
+			ep.QueueLen = queueLen
+			r.endpoints.Set(nodePath, ep)
+			found = true
+		}
+	}
+	if !found {
 		r.log.Warn().Str("nodePath", nodePath).Msg("Endpoint not found in registry")
 	}
+}
+
+// UpdateEndpointMetricsByEpID 按 EpID 精确更新单个端点的活跃请求数和队列长度
+func (r *LocalRegistry) UpdateEndpointMetricsByEpID(nodePath, epID string, active, queueLen int32) {
+	ep, ok := r.endpoints.GetByEpID(nodePath, epID)
+	if !ok {
+		r.log.Warn().Str("nodePath", nodePath).Str("epID", epID).Msg("Endpoint not found by EpID")
+		return
+	}
+	ep.Active = active
+	ep.QueueLen = queueLen
+	r.endpoints.Set(nodePath, ep)
+	r.log.Debug().Str("nodePath", nodePath).Str("epID", epID).Int32("active", active).Int32("queueLen", queueLen).Msg("UpdateEndpointMetricsByEpID called")
 }
 
 // CheckStaleEndpoints 检查过期端点
@@ -184,14 +214,12 @@ func (r *LocalRegistry) CheckStaleEndpoints(timeout time.Duration) {
 	now := time.Now()
 	for _, ep := range eps {
 		if now.Sub(ep.LastHeartbeat) > timeout {
-			if ep2, ok := r.endpoints.Get(ep.NodePath); ok {
-				if ep2.Healthy {
-					ep2.Healthy = false
-					r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint marked unhealthy due to timeout")
-				} else if now.Sub(ep2.LastHeartbeat) > timeout*2 {
-					r.endpoints.Delete(ep.NodePath)
-					r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint removed due to prolonged timeout")
-				}
+			if ep.Healthy {
+				ep.Healthy = false
+				r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint marked unhealthy due to timeout")
+			} else if now.Sub(ep.LastHeartbeat) > timeout*2 {
+				r.endpoints.DeleteByEpID(ep.NodePath, ep.EpID)
+				r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint removed due to prolonged timeout")
 			}
 		}
 	}
