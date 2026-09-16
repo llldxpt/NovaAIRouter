@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route Manager — novaairouter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+.header{background:#161b22;border-bottom:1px solid #30363d;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:18px;font-weight:600;color:#f0f6fc}
+.header span{font-size:12px;color:#8b949e}
+.main{max-width:900px;margin:0 auto;padding:24px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.card-header h2{font-size:16px;font-weight:600;color:#f0f6fc}
+.status-badge{padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;text-transform:uppercase}
+.status-running{background:#0d3322;color:#3fb950}
+.status-stopped{background:#331b1b;color:#f85149}
+.status-starting,.status-stopping{background:#332c0d;color:#d29922}
+.card-body{display:flex;flex-direction:column;gap:8px}
+.info-row{display:flex;justify-content:space-between;font-size:13px}
+.info-row .label{color:#8b949e}
+.info-row .value{color:#c9d1d9;font-family:monospace}
+.args-input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:13px;font-family:monospace;margin:12px 0;outline:none}
+.args-input:focus{border-color:#58a6ff}
+.args-hint{font-size:11px;color:#8b949e;margin-bottom:8px}
+.actions{display:flex;gap:8px}
+.btn{padding:8px 20px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn-start{background:#238636;color:#fff}
+.btn-start:hover{background:#2ea043}
+.btn-stop{background:#da3633;color:#fff}
+.btn-stop:hover{background:#f85149}
+.btn-start:disabled,.btn-stop:disabled{opacity:.4;cursor:not-allowed}
+.log-panel{background:#161b22;border:1px solid #30363d;border-radius:8px;overflow:hidden}
+.log-header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#1c2128;border-bottom:1px solid #30363d}
+.log-header h3{font-size:14px;font-weight:600;color:#f0f6fc}
+.log-tabs{display:flex;gap:4px}
+.log-tab{padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer;border:1px solid #30363d;background:transparent;color:#8b949e}
+.log-tab.active{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.log-content{height:300px;overflow-y:auto;padding:12px 20px;font-family:'Cascadia Code',Consolas,monospace;font-size:12px;line-height:1.6;background:#0d1117}
+.log-line{white-space:pre-wrap;word-break:break-all}
+.log-line .time{color:#484f58;margin-right:8px}
+.events-panel{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px 20px;margin-top:16px}
+.events-panel h3{font-size:14px;font-weight:600;color:#f0f6fc;margin-bottom:12px}
+.event-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #1c2128}
+.event-row .etime{color:#484f58;font-family:monospace}
+.event-row .ecomp{color:#8b949e}
+.event-row .estate{font-weight:600}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Route Manager</h1>
+  <span>novaairouter</span>
+</div>
+
+<div class="main">
+  <div class="cards">
+    <!-- Gateway Card -->
+    <div class="card" id="card-gateway">
+      <div class="card-header">
+        <h2>novaairouter Gateway</h2>
+        <span class="status-badge" id="gw-badge">stopped</span>
+      </div>
+      <div class="card-body">
+        <div class="info-row"><span class="label">Binary</span><span class="value">novaairouter.exe</span></div>
+        <div class="info-row"><span class="label">Business Port</span><span class="value">:15050</span></div>
+        <div class="info-row"><span class="label">Admin Port</span><span class="value">:15049</span></div>
+        <div class="info-row"><span class="label">Uptime</span><span class="value" id="gw-uptime">—</span></div>
+        <div class="args-hint">启动参数 (每行一个，如 --force --log-level=debug)</div>
+        <textarea class="args-input" id="gw-args" rows="2" placeholder="--force"></textarea>
+        <div class="actions">
+          <button class="btn btn-start" id="btn-gw-start" onclick="startComponent('gateway')">Start</button>
+          <button class="btn btn-stop" id="btn-gw-stop" onclick="stopComponent('gateway')" disabled>Stop</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Plugin Card -->
+    <div class="card" id="card-plugin">
+      <div class="card-header">
+        <h2>Model Router Plugin</h2>
+        <span class="status-badge" id="pl-badge">stopped</span>
+      </div>
+      <div class="card-body">
+        <div class="info-row"><span class="label">Binary</span><span class="value">model-router-plugin.exe</span></div>
+        <div class="info-row"><span class="label">Plugin Port</span><span class="value">:18011</span></div>
+        <div class="info-row"><span class="label">Config</span><span class="value">config.json</span></div>
+        <div class="info-row"><span class="label">Uptime</span><span class="value" id="pl-uptime">—</span></div>
+        <div class="args-hint" style="margin-top:58px">插件启动参数 (通常不需要额外参数)</div>
+        <textarea class="args-input" id="pl-args" rows="2" placeholder="--config config.json"></textarea>
+        <div class="actions">
+          <button class="btn btn-start" id="btn-pl-start" onclick="startComponent('plugin')">Start</button>
+          <button class="btn btn-stop" id="btn-pl-stop" onclick="stopComponent('plugin')" disabled>Stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log Panel -->
+  <div class="log-panel">
+    <div class="log-header">
+      <h3>Process Output</h3>
+      <div class="log-tabs">
+        <button class="log-tab active" onclick="switchLog('gateway', this)">Gateway</button>
+        <button class="log-tab" onclick="switchLog('plugin', this)">Plugin</button>
+      </div>
+    </div>
+    <div class="log-content" id="log-content"></div>
+  </div>
+
+  <!-- Events -->
+  <div class="events-panel">
+    <h3>Events</h3>
+    <div id="events-list"></div>
+  </div>
+</div>
+
+<script>
+let currentLog = 'gateway';
+let pollTimer;
+
+function fmtTime(t) {
+  const d = new Date(t);
+  return d.toLocaleTimeString('zh-CN', {hour12: false});
+}
+
+async function poll() {
+  try {
+    const resp = await fetch('/api/status');
+    const st = await resp.json();
+    updateCard('gateway', 'gw', st.gateway);
+    updateCard('plugin', 'pl', st.plugin);
+  } catch(e) {
+    console.error('poll error:', e);
+  }
+  fetchLogs();
+  fetchEvents();
+}
+
+function updateCard(comp, prefix, st) {
+  const badge = document.getElementById(prefix + '-badge');
+  const uptime = document.getElementById(prefix + '-uptime');
+  const btnStart = document.getElementById('btn-' + prefix + '-start');
+  const btnStop = document.getElementById('btn-' + prefix + '-stop');
+
+  badge.textContent = st.state;
+  badge.className = 'status-badge status-' + st.state;
+  uptime.textContent = st.uptime || '—';
+
+  const running = st.state === 'running';
+  const transitioning = st.state === 'starting' || st.state === 'stopping';
+  btnStart.disabled = running || transitioning;
+  btnStop.disabled = !running;
+}
+
+async function startComponent(comp) {
+  const argsField = comp === 'gateway' ? 'gw-args' : 'pl-args';
+  const raw = document.getElementById(argsField).value.trim();
+  const args = raw ? raw.split('\n').map(s => s.trim()).filter(s => s) : [];
+
+  try {
+    const resp = await fetch('/api/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({component: comp, args: args})
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert('Start failed: ' + err.error);
+    }
+  } catch(e) {
+    alert('Request failed: ' + e);
+  }
+}
+
+async function stopComponent(comp) {
+  if (!confirm('Stop ' + comp + '?')) return;
+  try {
+    const resp = await fetch('/api/stop', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({component: comp})
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert('Stop failed: ' + err.error);
+    }
+  } catch(e) {
+    alert('Request failed: ' + e);
+  }
+}
+
+async function fetchLogs() {
+  try {
+    const resp = await fetch('/api/logs?component=' + currentLog);
+    const data = await resp.json();
+    const el = document.getElementById('log-content');
+    el.innerHTML = data.logs.map(l => '<div class="log-line">' + escapeHtml(l) + '</div>').join('\n');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {}
+}
+
+async function fetchEvents() {
+  try {
+    const resp = await fetch('/api/events');
+    const data = await resp.json();
+    const el = document.getElementById('events-list');
+    el.innerHTML = data.events.slice().reverse().map(ev =>
+      '<div class="event-row">' +
+      '<span class="etime">' + fmtTime(ev.time) + '</span>' +
+      '<span class="ecomp">' + ev.component + '</span>' +
+      '<span class="estate status-' + ev.state + '">' + ev.state + '</span>' +
+      '</div>'
+    ).join('');
+  } catch(e) {}
+}
+
+function switchLog(comp, tab) {
+  currentLog = comp;
+  document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  fetchLogs();
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Start polling
+poll();
+pollTimer = setInterval(poll, 2000);
+</script>
+</body>
+</html>
