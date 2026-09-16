@@ -193,16 +193,21 @@ func (m *PoolManager) CreatePool(path, serviceID, targetURL string, maxConcur in
 
 func (m *PoolManager) RemovePool(path, serviceID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var p *RequestPool
 	if subMap, ok := m.pools[path]; ok {
 		if pool, ok := subMap[serviceID]; ok {
-			pool.Shutdown()
+			p = pool
 			delete(subMap, serviceID)
 			if len(subMap) == 0 {
 				delete(m.pools, path)
 			}
-			m.log.Info().Str("path", path).Str("serviceID", serviceID).Msg("Removed request pool")
 		}
+	}
+	m.mu.Unlock()
+
+	if p != nil {
+		p.Shutdown()
+		m.log.Info().Str("path", path).Str("serviceID", serviceID).Msg("Removed request pool")
 	}
 }
 
@@ -338,7 +343,17 @@ func (w *worker) processRequest(req *queueRequest) {
 		targetURL += "?" + req.R.URL.RawQuery
 	}
 	w.pool.log.Info().Str("pool_path", w.pool.path).Str("req_path", req.R.URL.Path).Str("subPath", subPath).Str("targetURL", targetURL).Msg("processRequest: computed targetURL, calling forwardRequestWithHeaders")
-	w.pool.forwardRequestWithHeaders(req.Ctx, req.W, req.R.Method, targetURL, req.R.Header.Clone(), body, nil)
+	// Merge pool context (for shutdown) and request context (for client disconnect)
+	ctx, cancel := context.WithCancel(w.pool.context)
+	defer cancel()
+	go func() {
+		select {
+		case <-req.Ctx.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	w.pool.forwardRequestWithHeaders(ctx, req.W, req.R.Method, targetURL, req.R.Header.Clone(), body, nil)
 	w.pool.log.Info().Msg("processRequest: forwardRequestWithHeaders returned, closing Done")
 	close(req.Done)
 	w.pool.log.Info().Msg("processRequest: END")
@@ -412,21 +427,30 @@ func (p *RequestPool) forwardRequestWithHeaders(ctx context.Context, w http.Resp
 	}
 	defer resp.Body.Close()
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-
-	w.WriteHeader(resp.StatusCode)
-
-	// Check if streaming response
+	// Check if streaming response BEFORE WriteHeader (RFC 7230 compliance)
 	ct := resp.Header.Get("Content-Type")
 	isStreaming := strings.Contains(ct, "text/event-stream") ||
 		strings.Contains(ct, "application/x-ndjson") ||
 		resp.Header.Get("Transfer-Encoding") == "chunked"
 
 	if isStreaming {
+		// SSE streaming response: handle before WriteHeader to avoid Content-Length: 0 issue
+		// RFC 7230 requires: Transfer-Encoding: chunked must NOT have Content-Length
+		for key, values := range resp.Header {
+			if key != "Content-Length" {
+				for _, value := range values {
+					w.Header().Add(key, value)
+				}
+			}
+		}
+		// Ensure Transfer-Encoding: chunked for streaming response
+		w.Header().Set("Transfer-Encoding", "chunked")
+		// Explicitly delete Content-Length to avoid conflict with chunked encoding
+		w.Header().Del("Content-Length")
+		// Write HTTP status and headers before body for chunked encoding
+		w.WriteHeader(resp.StatusCode)
+
+		// SSE streaming data forwarding
 		if flusher, ok := w.(http.Flusher); ok {
 			buf := make([]byte, 4096)
 			for {
@@ -446,7 +470,16 @@ func (p *RequestPool) forwardRequestWithHeaders(ctx context.Context, w http.Resp
 			}
 			return
 		}
+		// If Flusher not supported, fall through to io.Copy
 	}
+
+	// Normal HTTP response: keep original logic unchanged
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
 

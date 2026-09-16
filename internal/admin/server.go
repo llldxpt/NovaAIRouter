@@ -83,7 +83,14 @@ func (s *AdminServer) Start() error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			s.registry.CheckStaleEndpoints(s.config.HeartbeatTimeout)
+			// Check and clean stale local endpoints, also clean corresponding pools
+			deletedEps := s.registry.CheckStaleEndpoints(s.config.HeartbeatTimeout)
+			for _, ep := range deletedEps {
+				if s.poolMgr != nil {
+					s.poolMgr.RemovePool(ep.NodePath, ep.EpID)
+					s.log.Info().Str("node_path", ep.NodePath).Str("ep_id", ep.EpID).Msg("Removed pool for deleted endpoint")
+				}
+			}
 			s.registry.CleanStaleRemoteNodes(s.config.HeartbeatTimeout*2, s.config.HeartbeatTimeout*3)
 			// Update cluster metrics
 			remoteNodes := s.registry.GetRemoteNodes()

@@ -103,9 +103,9 @@ func (r *Registry) UpdateEndpointMetricsByEpID(nodePath, epID string, active, qu
 	r.local.UpdateEndpointMetricsByEpID(nodePath, epID, active, queueLen)
 }
 
-// CheckStaleEndpoints 检查过期端点
-func (r *Registry) CheckStaleEndpoints(timeout time.Duration) {
-	r.local.CheckStaleEndpoints(timeout)
+// CheckStaleEndpoints 检查过期端点，返回被删除的端点列表
+func (r *Registry) CheckStaleEndpoints(timeout time.Duration) []*models.LocalEndpoint {
+	return r.local.CheckStaleEndpoints(timeout)
 }
 
 // UpdateRemoteNode 更新远程节点

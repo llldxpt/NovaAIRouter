@@ -208,10 +208,11 @@ func (r *LocalRegistry) UpdateEndpointMetricsByEpID(nodePath, epID string, activ
 	r.log.Debug().Str("nodePath", nodePath).Str("epID", epID).Int32("active", active).Int32("queueLen", queueLen).Msg("UpdateEndpointMetricsByEpID called")
 }
 
-// CheckStaleEndpoints 检查过期端点
-func (r *LocalRegistry) CheckStaleEndpoints(timeout time.Duration) {
+// CheckStaleEndpoints 检查过期端点，返回被删除的端点列表
+func (r *LocalRegistry) CheckStaleEndpoints(timeout time.Duration) []*models.LocalEndpoint {
 	eps := r.endpoints.List()
 	now := time.Now()
+	var deletedEps []*models.LocalEndpoint
 	for _, ep := range eps {
 		if now.Sub(ep.LastHeartbeat) > timeout {
 			if ep.Healthy {
@@ -219,10 +220,12 @@ func (r *LocalRegistry) CheckStaleEndpoints(timeout time.Duration) {
 				r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint marked unhealthy due to timeout")
 			} else if now.Sub(ep.LastHeartbeat) > timeout*2 {
 				r.endpoints.DeleteByEpID(ep.NodePath, ep.EpID)
-				r.log.Warn().Str("node_path", ep.NodePath).Msg("Endpoint removed due to prolonged timeout")
+				deletedEps = append(deletedEps, ep)
+				r.log.Warn().Str("node_path", ep.NodePath).Str("ep_id", ep.EpID).Msg("Endpoint removed due to prolonged timeout")
 			}
 		}
 	}
+	return deletedEps
 }
 
 // GetEndpointDescriptions 获取端点描述
