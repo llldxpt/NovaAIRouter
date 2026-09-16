@@ -1,0 +1,11 @@
+{
+  "router_addr": "localhost:15049",
+  "plugin_addr": ":18011",
+  "session_timeout": 600,
+  "lb_algorithm": "least_conn",
+  "health_check_interval": 10,
+  "election_timeout": 3,
+  "heartbeat_interval": 1,
+  "sync_interval": 30,
+  "heartbeat_to_router": 5
+}

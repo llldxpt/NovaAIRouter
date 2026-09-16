@@ -58,7 +58,7 @@ This is a **decentralized AI gateway cluster** — no central coordinator. Each 
 
 ### Plugin System
 
-Plugins register via the Admin API and communicate through the gossip layer. See `docs/MODEL_ROUTER_PLUGIN.md` for the Model Router plugin which enables model-name-based routing on top of path routing.
+Plugins register via the Admin API and communicate through the gossip layer. See `models_plugin/MODEL_ROUTER_PLUGIN.md` for the Model Router plugin which enables model-name-based routing on top of path routing.
 
 ### Health & Failover
 
