@@ -3,8 +3,9 @@
 *.dll
 *.so
 *.dylib
-gateway
-novaairouter
+# 注意：必须锚定根路径，否则会连带忽略 cmd/gateway/ 等同名源码目录
+/gateway
+/novaairouter
 
 # Test binaries
 integration.test.exe

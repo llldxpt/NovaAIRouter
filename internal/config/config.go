@@ -44,6 +44,7 @@ type Config struct {
 	DiscoveryAddr   string
 	APIKey          string
 	DisableAdminAuth bool
+	ShareMode        string
 	TLSEnabled      bool
 	TLSCertFile     string
 	TLSKeyFile      string
