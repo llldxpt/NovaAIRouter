@@ -67,3 +67,10 @@ grafana-dashboard.json
 # Build artifacts
 dist/
 build/
+
+# Local runtime state / copies (not part of the repo)
+release/
+config_user/
+node_modules/
+非项目必须请放此文件夹中/
+*.exe~
